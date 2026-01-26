@@ -2,6 +2,7 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import cors, { CorsOptions } from "cors";
 import router from "./router/router";
+import errorMiddleware from "./middlewares/errorMiddleware";
 
 const app = express();
 
@@ -32,7 +33,7 @@ const corsOptions: CorsOptions = {
 app.use(cors(corsOptions));
 app.options("/{*splat}", cors(corsOptions));
 app.use(router);
-
+app.use(errorMiddleware);
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
