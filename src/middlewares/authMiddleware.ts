@@ -8,19 +8,31 @@ const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
     throw new ApiError(401, "UNAUTHORIZED", "No authorization header provided");
   }
 
-  const token = authHeader.split(" ")[1];
+  const parts = authHeader.split(" ");
+  if (parts.length !== 2 || parts[0] !== "Bearer") {
+    throw new ApiError(
+      401,
+      "UNAUTHORIZED",
+      "Invalid authorization header format",
+    );
+  }
+  const token = parts[1];
   if (!token) {
     throw new ApiError(401, "UNAUTHORIZED", "No token provided");
   }
 
-  const tokenData = TokenService.verifyAccessToken(token);
+  try {
+    const tokenData = TokenService.verifyAccessToken(token);
 
-  if (!tokenData || typeof tokenData.userId !== "string") {
+    if (!tokenData || typeof tokenData.userId !== "string") {
+      throw new ApiError(401, "UNAUTHORIZED", "Invalid token");
+    }
+
+    req.userId = tokenData.userId;
+    next();
+  } catch {
     throw new ApiError(401, "UNAUTHORIZED", "Invalid token");
   }
-
-  req.userId = tokenData.userId;
-  next();
 };
 
 export default authMiddleware;

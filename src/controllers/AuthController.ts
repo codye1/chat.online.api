@@ -6,6 +6,7 @@ import TokenService from "../service/TokenService";
 import expireToNumber from "../utils/expireToNumber";
 import jwtConfig from "../configs/jwtConfig";
 import { googleClient } from "../lib/google";
+import getEnv from "../utils/getEnv";
 
 class AuthController {
   static issueTokensAndSetRefreshCookie = async (
@@ -22,6 +23,8 @@ class AuthController {
     res.cookie("refreshToken", tokens.refreshToken, {
       httpOnly: true,
       maxAge: expireToNumber(jwtConfig.refreshExpiresIn),
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
     });
 
     return tokens.accessToken;
@@ -97,8 +100,8 @@ class AuthController {
       res,
       user.id,
     );
-
-    return res.json({ accessToken, user });
+    const { password: _password, ...safeUser } = user;
+    return res.json({ accessToken, user: safeUser });
   }
 
   static async refreshToken(req: Request, res: Response) {
@@ -116,7 +119,6 @@ class AuthController {
     if (!user) throw new ApiError(404, "NOT_FOUND", "User not found");
     await TokenService.removeRefreshToken(refreshToken);
 
-    // Exclude password from user object and rename id to userId
     const { password: _password, ...safeUser } = user;
 
     const accessToken = await AuthController.issueTokensAndSetRefreshCookie(
@@ -125,7 +127,7 @@ class AuthController {
     );
 
     return res.json({
-      accessToken: accessToken,
+      accessToken,
       user: safeUser,
       message: "Token refreshed successfully",
     });
@@ -147,7 +149,7 @@ class AuthController {
 
     const ticket = await googleClient.verifyIdToken({
       idToken: credential,
-      audience: process.env.GOOGLE_CLIENT_ID,
+      audience: getEnv("GOOGLE_CLIENT_ID"),
     });
 
     const payload = ticket.getPayload();
