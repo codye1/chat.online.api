@@ -18,11 +18,15 @@ model User {
   email         String         @unique
   nickname      String         @unique
   password      String  ?
+  avatarUrl   String  ?
 
   provider      String   @default("LOCAL")
 
   createdAt     DateTime @default(now())
   refreshTokens RefreshToken[]
+
+  sentMessages     Message[]
+  conversations    Conversation[]
 }
 
 model RefreshToken {
@@ -33,4 +37,28 @@ model RefreshToken {
   createdAt    DateTime @default(now())
 
   @@index([userId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  senderId       String
+  text        String
+  createdAt      DateTime     @default(now())
+  read       Boolean      @default(false)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([senderId])
+}
+
+model Conversation {
+  id           String      @id @default(cuid())
+  title        String  ?
+  type         String    @default("DIRECT")
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  participants User[]
+  messages     Message[]
 }

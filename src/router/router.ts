@@ -1,5 +1,6 @@
 import { Router } from "express";
 import AuthController from "../controllers/AuthController";
+import ChatController from "../controllers/ChatContrroller";
 import authMiddleware from "../middlewares/authMiddleware";
 import { prisma } from "../lib/prisma";
 
@@ -19,6 +20,37 @@ router.post("/auth/login", AuthController.login);
 router.post("/auth/refresh", AuthController.refreshToken);
 router.post("/auth/logout", AuthController.logout);
 router.post("/auth/google", AuthController.googleAuth);
+
+router.get(
+  "/chat/conversation",
+  authMiddleware,
+  ChatController.getConversation,
+);
+
+router.get(
+  "/chat/conversations",
+  authMiddleware,
+  ChatController.getConversations,
+);
+router.post(
+  "/chat/conversations",
+  authMiddleware,
+  ChatController.createConversation,
+);
+
+router.post(
+  "/chat/conversations/:id/messages",
+  authMiddleware,
+  ChatController.sendMessage,
+);
+router.get(
+  "/chat/conversations/:id/messages",
+  authMiddleware,
+  ChatController.getMessages,
+);
+
+router.get("/chat/search", authMiddleware, ChatController.search);
+
 router.get("/protected", authMiddleware, async (req, res) => {
   res.json({
     message: `Hello user ${req.userId}, you have accessed a protected route!`,

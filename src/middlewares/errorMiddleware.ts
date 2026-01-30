@@ -11,6 +11,8 @@ const errorMiddleware = (
     return next(err);
   }
 
+  console.error(err);
+
   if (err instanceof ApiError) {
     return res.status(err.status).json({
       error: {

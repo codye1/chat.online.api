@@ -53,6 +53,18 @@ class UserService {
       data,
     });
   }
+
+  static async getUsersByNicknameQuery(query: string) {
+    return await prisma.user.findMany({
+      where: {
+        nickname: {
+          contains: query,
+          mode: "insensitive",
+        },
+      },
+      take: 10,
+    });
+  }
 }
 
 export default UserService;
