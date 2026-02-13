@@ -1,174 +1,191 @@
 import { prisma } from "../lib/prisma";
 
-interface User {
-  id: string;
-  nickname: string;
-  avatarUrl?: string | null;
-}
-
-interface Message {
-  id: string;
-  text: string;
-  conversationId: string;
-  senderId: string;
-  read: boolean;
-  createdAt: Date;
-}
-
 interface Conversation {
   id: string;
-  avatarUrl: string | null;
   title: string;
-  type: "DIRECT" | "GROUP";
-  participants: User[];
-  lastMessage: Message | null;
-  unreadMessages: number;
-  messages: Message[];
+  avatarUrl: string | null;
+  participants: {
+    user: {
+      id: string;
+      nickname: string;
+      avatarUrl: string | null;
+    };
+  }[];
+  lastReadMessageId: string | null;
+  unreadMessages?: number;
 }
 
-interface PrismaConversationRow {
+interface ConversationsItem {
   id: string;
-  title: string | null;
-  type: "DIRECT" | "GROUP";
-  participants: {
-    id: string;
-    nickname: string;
-    avatarUrl: string | null;
-  }[];
-  messages: Message[];
-  _count: {
-    messages: number;
-  };
+  title: string;
+  avatarUrl: string | null;
+  unreadMessages: number;
+  lastMessage: {
+    text: string;
+    createdAt: Date;
+  } | null;
 }
 
 class ConversationService {
-  private static toConversationDto(
-    row: PrismaConversationRow,
+  static async getConversationsByUserId(
     userId: string,
-  ): Conversation {
-    const otherParticipant = row.participants.find((p) => p.id !== userId);
+  ): Promise<ConversationsItem[]> {
+    const conversations = await prisma.conversation.findMany({
+      where: {
+        participants: { some: { userId } },
+      },
+      include: {
+        messages: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+        participants: {
+          include: {
+            user: {
+              select: { id: true, nickname: true, avatarUrl: true },
+            },
+          },
+        },
+      },
+    });
 
-    // Determine title and iconUrl based on whether it's a group or direct conversation
+    const conversationsWithUnread = await Promise.all(
+      conversations.map(async (conversation) => {
+        const myParticipant = conversation.participants.find(
+          (p) => p.userId === userId,
+        );
+        const otherParticipant = conversation.participants.find(
+          (p) => p.userId !== userId,
+        );
+        const unreadCount = await prisma.message.count({
+          where: {
+            conversationId: conversation.id,
+            senderId: { not: userId },
+            id: {
+              gt: myParticipant?.lastReadMessageId ?? "",
+            },
+          },
+        });
+
+        return {
+          ...conversation,
+          title: conversation.title ?? otherParticipant?.user.nickname ?? "",
+          avatarUrl: otherParticipant?.user.avatarUrl ?? null,
+          lastMessage: conversation.messages[0],
+          unreadMessages: unreadCount,
+        };
+      }),
+    );
+
+    return conversationsWithUnread;
+  }
+
+  static async getConversationById(
+    conversationId: string,
+    userId: string,
+  ): Promise<Conversation | null> {
+    const conversation = await prisma.conversation.findUnique({
+      where: { id: conversationId },
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                nickname: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!conversation) return null;
+
+    const otherParticipant = conversation.participants
+      .map((p) => p.user)
+      .find((user) => user.id !== userId);
+
     const title =
-      row.title ??
+      conversation.title ??
       (otherParticipant?.nickname ? otherParticipant.nickname : "");
+
     const avatarUrl = otherParticipant?.avatarUrl
       ? otherParticipant.avatarUrl
       : null;
 
-    const last = row.messages[0];
+    const myParticipant = conversation.participants.find(
+      (p) => p.userId === userId,
+    );
+
+    const unreadCount = await prisma.message.count({
+      where: {
+        conversationId: conversation.id,
+        senderId: { not: userId },
+        id: {
+          gt: myParticipant?.lastReadMessageId ?? "",
+        },
+      },
+    });
 
     return {
-      id: row.id,
+      ...conversation,
       title,
-      avatarUrl: avatarUrl || null,
-      participants: row.participants,
-      messages: row.messages,
-      type: row.type,
-      lastMessage: last ?? null,
-      unreadMessages: row._count.messages,
+      avatarUrl,
+      lastReadMessageId: myParticipant?.lastReadMessageId ?? null,
+      unreadMessages: unreadCount,
     };
   }
 
-  static async getConversationsByUserId(
+  static async getConversationByUsersId(
+    userIds: string[],
     userId: string,
-  ): Promise<Conversation[]> {
-    const rows = await prisma.conversation.findMany({
-      where: {
-        participants: {
-          some: { id: userId },
-        },
-      },
-      select: {
-        id: true,
-        title: true,
-        participants: {
-          select: {
-            id: true,
-            nickname: true,
-            avatarUrl: true,
-          },
-        },
-        messages: {
-          orderBy: { createdAt: "desc" },
-          take: 1,
-          select: {
-            text: true,
-            createdAt: true,
-          },
-        },
-        _count: {
-          select: {
-            messages: {
-              where: {
-                read: false,
-                sender: {
-                  id: { not: userId },
-                },
-              },
-            },
-          },
-        },
-      },
-    });
-
-    return (rows as PrismaConversationRow[]).map((row) =>
-      this.toConversationDto(row, userId),
-    );
-  }
-
-  static async getConversationById(conversationId: string) {
-    return await prisma.conversation.findUnique({
-      where: { id: conversationId },
-      include: {
-        participants: true,
-        messages: {
-          orderBy: { createdAt: "desc" },
-        },
-      },
-    });
-  }
-
-  static async getConversationByUsersId(userIds: string[], userId: string) {
+  ): Promise<Conversation | null> {
     const conversation = await prisma.conversation.findFirst({
       where: {
         participants: {
           every: {
-            id: { in: userIds },
+            userId: { in: userIds },
           },
         },
       },
-      select: {
-        id: true,
-        title: true,
-        participants: true,
-        type: true,
-        messages: {
-          orderBy: { createdAt: "desc" },
-        },
-        _count: {
-          select: {
-            messages: {
-              where: {
-                read: false,
-                sender: {
-                  id: { not: userId },
-                },
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                nickname: true,
+                avatarUrl: true,
               },
             },
           },
         },
       },
     });
+    if (!conversation) return null;
 
-    if (!conversation) {
-      return null;
-    }
+    const otherParticipant = conversation.participants
+      .map((p) => p.user)
+      .find((user) => user.id !== userId);
 
-    return this.toConversationDto(
-      conversation as PrismaConversationRow,
-      userId,
+    const title =
+      conversation.title ??
+      (otherParticipant?.nickname ? otherParticipant.nickname : "");
+
+    const avatarUrl = otherParticipant?.avatarUrl
+      ? otherParticipant.avatarUrl
+      : null;
+
+    const myParticipant = conversation.participants.find(
+      (p) => p.userId === userId,
     );
+    return {
+      ...conversation,
+      title,
+      avatarUrl,
+      lastReadMessageId: myParticipant?.lastReadMessageId ?? null,
+    };
   }
 
   static async createConversation({
@@ -179,37 +196,52 @@ class ConversationService {
     participantIds: string[];
     title: string | null;
     userId: string;
-  }) {
+  }): Promise<Conversation | null> {
     const conversation = await prisma.conversation.create({
       data: {
-        title: title,
+        title,
         participants: {
-          connect: participantIds.map((id) => ({ id })),
+          create: participantIds.map((id) => ({
+            userId: id,
+          })),
         },
       },
       include: {
-        participants: true,
-        messages: {
-          orderBy: { createdAt: "desc" },
-        },
-        _count: {
-          select: {
-            messages: {
-              where: {
-                read: false,
-                sender: {
-                  id: { not: userId },
-                },
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                nickname: true,
+                avatarUrl: true,
               },
             },
           },
         },
       },
     });
-    return this.toConversationDto(
-      conversation as PrismaConversationRow,
-      userId,
+    if (!conversation) return null;
+
+    const otherParticipant = conversation.participants
+      .map((p) => p.user)
+      .find((user) => user.id !== userId);
+
+    const conversationTitle =
+      conversation.title ??
+      (otherParticipant?.nickname ? otherParticipant.nickname : "");
+
+    const avatarUrl = otherParticipant?.avatarUrl
+      ? otherParticipant.avatarUrl
+      : null;
+    const myParticipant = conversation.participants.find(
+      (p) => p.userId === userId,
     );
+    return {
+      ...conversation,
+      title: conversationTitle,
+      avatarUrl,
+      lastReadMessageId: myParticipant?.lastReadMessageId ?? null,
+    };
   }
 }
 

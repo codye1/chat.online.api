@@ -13,8 +13,10 @@ class ChatController {
     };
 
     if (conversationId) {
-      const conversation =
-        await ConversationService.getConversationById(conversationId);
+      const conversation = await ConversationService.getConversationById(
+        conversationId,
+        userId,
+      );
 
       return res.json(conversation);
     }
@@ -25,11 +27,20 @@ class ChatController {
         userId,
       );
 
-      if (conversation) {
-        return res.json(conversation);
+      if (!conversation) {
+        const recipient = await UserService.getUserById(recipientId);
+        if (!recipient) {
+          throw new ApiError(404, "USER_NOT_FOUND", "Recipient user not found");
+        }
+
+        return res.json({
+          id: null,
+          title: recipient.nickname,
+          avatarUrl: recipient.avatarUrl,
+        });
       }
 
-      return res.json(null);
+      return res.json(conversation);
     }
 
     throw new ApiError(
@@ -73,9 +84,24 @@ class ChatController {
   }
 
   static async getMessages(req: Request<{ id: string }>, res: Response) {
+    const userId = req.userId;
     const { id } = req.params;
+    const take = 20;
+    const { cursor, direction, jumpToLatest } = req.query as {
+      cursor?: string;
+      direction?: "UP" | "DOWN";
+      jumpToLatest?: boolean;
+    };
 
-    const messages = await MessageService.getMessagesByConversationId(id);
+    const messages = await MessageService.getMessagesByConversationId(
+      id,
+      cursor,
+      direction,
+      userId,
+      take,
+      jumpToLatest,
+    );
+
     return res.json(messages);
   }
 

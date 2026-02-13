@@ -26,7 +26,7 @@ model User {
   refreshTokens RefreshToken[]
 
   sentMessages     Message[]
-  conversations    Conversation[]
+  conversations    ConversationParticipant[]
 }
 
 model RefreshToken {
@@ -45,7 +45,6 @@ model Message {
   senderId       String
   text        String
   createdAt      DateTime     @default(now())
-  read       Boolean      @default(false)
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
 
@@ -59,6 +58,23 @@ model Conversation {
   type         String    @default("DIRECT")
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
-  participants User[]
+  participants ConversationParticipant[]
   messages     Message[]
+}
+
+model ConversationParticipant {
+  id             String       @id @default(cuid())
+  userId         String
+  conversationId String
+
+  lastReadMessageId String?
+
+
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+
+
+  @@unique([userId, conversationId])
+  @@index([conversationId])
 }

@@ -41,7 +41,7 @@ const initializeSocket = async (io: Server) => {
       const { conversationId, recipientId, text } = data;
 
       if (!conversationId && recipientId) {
-        let conversation = await ConversationService.getConversationByUsersId(
+        const conversation = await ConversationService.getConversationByUsersId(
           [socket.data.userId, recipientId],
           socket.data.userId,
         );
@@ -62,23 +62,35 @@ const initializeSocket = async (io: Server) => {
           return;
         }
 
-        conversation = await ConversationService.createConversation({
-          participantIds: [socket.data.userId, recipientId],
-          title: null,
-          userId: socket.data.userId,
+        const createdConversation =
+          await ConversationService.createConversation({
+            participantIds: [socket.data.userId, recipientId],
+            title: null,
+            userId: socket.data.userId,
+          });
+
+        if (!createdConversation) {
+          throw new Error("Failed to create conversation");
+        }
+
+        socket.to(recipientId).emit("conversation:new", {
+          ...createdConversation,
+          unreadMessages: 0,
         });
-        socket.to(recipientId).emit("conversation:new", conversation);
-        socket.join(conversation.id);
-        io.to(conversation.id).emit("conversation:update", conversation);
+        socket.join(createdConversation.id);
+        io.to(createdConversation.id).emit(
+          "conversation:update",
+          createdConversation,
+        );
         const message = await MessageService.createMessage({
-          conversationId: conversation.id,
+          conversationId: createdConversation.id,
           senderId: socket.data.userId,
           text,
         });
+        io.to(createdConversation.id).emit("message:new", message);
 
-        io.to(conversation.id).emit("message:new", message);
         console.log(
-          `User ${socket.data.userId} ${socket.id} sent message to conversation ${conversation.id}`,
+          `User ${socket.data.userId} ${socket.id} sent message to conversation ${createdConversation.id}`,
         );
       }
 
@@ -94,6 +106,26 @@ const initializeSocket = async (io: Server) => {
           `User ${socket.data.userId} ${socket.id} sent message to conversation ${conversationId}`,
         );
       }
+    });
+
+    socket.on("message:read", async (data) => {
+      const { conversationId, lastReadMessageId } = data;
+      console.log(lastReadMessageId);
+
+      io.to(conversationId).emit("message:read", {
+        conversationId,
+        lastReadMessageId,
+      });
+
+      await MessageService.markMessagesAsRead({
+        conversationId,
+        userId: socket.data.userId,
+        lastReadMessageId,
+      });
+
+      console.log(
+        `User ${socket.data.userId} ${socket.id} read messages in conversation ${conversationId}`,
+      );
     });
 
     socket.on("disconnect", () => {
