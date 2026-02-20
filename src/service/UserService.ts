@@ -44,6 +44,12 @@ class UserService {
   static async getUserById(id: string) {
     return await prisma.user.findUnique({
       where: { id },
+      include: {
+        refreshTokens: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+      },
     });
   }
 
@@ -51,6 +57,18 @@ class UserService {
     return await prisma.user.update({
       where: { id },
       data,
+    });
+  }
+
+  static async getUsersByNicknameQuery(query: string) {
+    return await prisma.user.findMany({
+      where: {
+        nickname: {
+          contains: query,
+          mode: "insensitive",
+        },
+      },
+      take: 10,
     });
   }
 }
