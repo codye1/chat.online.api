@@ -1,5 +1,4 @@
 import { prisma } from "../lib/prisma";
-import TokenService from "./TokenService";
 
 interface ConversationsItem {
   id: string;
@@ -33,7 +32,12 @@ interface ConversationWithParticipants {
   participants: {
     userId: string;
     lastReadMessageId: string | null;
-    user: { id: string; nickname: string; avatarUrl: string | null };
+    user: {
+      id: string;
+      nickname: string;
+      avatarUrl: string | null;
+      refreshTokens?: { lastSeenAt: Date }[];
+    };
   }[];
 }
 
@@ -59,32 +63,33 @@ class ConversationService {
       (p) => p.userId === userId,
     );
 
-    const [lastReadIdByParticipants, unreadCount, lastSeenAt] =
-      await Promise.all([
-        prisma.conversationParticipant.findMany({
-          where: { conversationId: conversation.id, userId: { not: userId } },
-          select: {
-            userId: true,
-            lastReadMessageId: true,
-          },
-          orderBy: { lastReadMessageId: "desc" },
-          take: 1,
-        }),
-        options?.includeUnreadCount
-          ? prisma.message.count({
-              where: {
-                conversationId: conversation.id,
-                senderId: { not: userId },
-                id: {
-                  gt: myParticipant?.lastReadMessageId ?? "",
-                },
+    const [lastReadIdByParticipants, unreadCount] = await Promise.all([
+      prisma.conversationParticipant.findMany({
+        where: { conversationId: conversation.id, userId: { not: userId } },
+        select: {
+          userId: true,
+          lastReadMessageId: true,
+        },
+        orderBy: { lastReadMessageId: "desc" },
+        take: 1,
+      }),
+      options?.includeUnreadCount
+        ? prisma.message.count({
+            where: {
+              conversationId: conversation.id,
+              senderId: { not: userId },
+              id: {
+                gt: myParticipant?.lastReadMessageId ?? "",
               },
-            })
-          : Promise.resolve(undefined),
-        conversation.type === "DIRECT" && otherParticipant
-          ? TokenService.getLastSeenAt(otherParticipant.id)
-          : Promise.resolve(null),
-      ]);
+            },
+          })
+        : Promise.resolve(undefined),
+    ]);
+
+    const lastSeenAt =
+      conversation.type === "DIRECT" && otherParticipant
+        ? (otherParticipant.refreshTokens?.[0]?.lastSeenAt ?? null)
+        : null;
 
     return {
       ...conversation,
@@ -115,9 +120,22 @@ class ConversationService {
         participants: {
           include: {
             user: {
-              select: { id: true, nickname: true, avatarUrl: true },
+              select: {
+                id: true,
+                nickname: true,
+                avatarUrl: true,
+                refreshTokens: {
+                  orderBy: { lastSeenAt: "desc" },
+                  take: 1,
+                  select: { lastSeenAt: true },
+                },
+              },
             },
           },
+          where: {
+            OR: [{ userId: userId }, { userId: { not: userId } }],
+          },
+          take: 2,
         },
       },
     });
@@ -140,16 +158,108 @@ class ConversationService {
           },
         });
 
+        const lastSeenAt =
+          conversation.type === "DIRECT" && otherParticipant
+            ? (otherParticipant.user.refreshTokens[0]?.lastSeenAt ?? null)
+            : null;
+
         return {
           ...conversation,
           title: conversation.title ?? otherParticipant?.user.nickname ?? "",
           avatarUrl: otherParticipant?.user.avatarUrl ?? null,
           lastMessage: conversation.messages[0] ?? null,
           unreadMessages: unreadCount,
-          lastSeenAt:
-            conversation.type === "DIRECT" && otherParticipant
-              ? await TokenService.getLastSeenAt(otherParticipant.user.id)
-              : null,
+          lastSeenAt,
+        };
+      }),
+    );
+
+    return conversationsWithUnread;
+  }
+
+  static async searchConversationsByUserId(
+    userId: string,
+    query: string,
+  ): Promise<ConversationsItem[]> {
+    const conversations = await prisma.conversation.findMany({
+      where: {
+        participants: { some: { userId } },
+        OR: [
+          {
+            type: "GROUP",
+            title: { contains: query, mode: "insensitive" },
+          },
+          {
+            type: "DIRECT",
+            participants: {
+              some: {
+                userId: { not: userId },
+                user: {
+                  nickname: { contains: query, mode: "insensitive" },
+                },
+              },
+            },
+          },
+        ],
+      },
+      include: {
+        messages: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                nickname: true,
+                avatarUrl: true,
+                refreshTokens: {
+                  orderBy: { lastSeenAt: "desc" },
+                  take: 1,
+                  select: { lastSeenAt: true },
+                },
+              },
+            },
+          },
+          where: {
+            OR: [{ userId: userId }, { userId: { not: userId } }],
+          },
+          take: 2,
+        },
+      },
+    });
+
+    const conversationsWithUnread = await Promise.all(
+      conversations.map(async (conversation) => {
+        const myParticipant = conversation.participants.find(
+          (p) => p.userId === userId,
+        );
+        const otherParticipant = conversation.participants.find(
+          (p) => p.userId !== userId,
+        );
+        const unreadCount = await prisma.message.count({
+          where: {
+            conversationId: conversation.id,
+            senderId: { not: userId },
+            id: {
+              gt: myParticipant?.lastReadMessageId ?? "",
+            },
+          },
+        });
+
+        const lastSeenAt =
+          conversation.type === "DIRECT" && otherParticipant
+            ? (otherParticipant.user.refreshTokens[0]?.lastSeenAt ?? null)
+            : null;
+
+        return {
+          ...conversation,
+          title: conversation.title ?? otherParticipant?.user.nickname ?? "",
+          avatarUrl: otherParticipant?.user.avatarUrl ?? null,
+          lastMessage: conversation.messages[0] ?? null,
+          unreadMessages: unreadCount,
+          lastSeenAt,
         };
       }),
     );
@@ -179,6 +289,11 @@ class ConversationService {
                 id: true,
                 nickname: true,
                 avatarUrl: true,
+                refreshTokens: {
+                  orderBy: { lastSeenAt: "desc" },
+                  take: 1,
+                  select: { lastSeenAt: true },
+                },
               },
             },
           },
@@ -217,6 +332,11 @@ class ConversationService {
                 id: true,
                 nickname: true,
                 avatarUrl: true,
+                refreshTokens: {
+                  orderBy: { lastSeenAt: "desc" },
+                  take: 1,
+                  select: { lastSeenAt: true },
+                },
               },
             },
           },
@@ -264,6 +384,11 @@ class ConversationService {
                 id: true,
                 nickname: true,
                 avatarUrl: true,
+                refreshTokens: {
+                  orderBy: { lastSeenAt: "desc" },
+                  take: 1,
+                  select: { lastSeenAt: true },
+                },
               },
             },
           },

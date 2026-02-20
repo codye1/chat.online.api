@@ -35,7 +35,7 @@ model RefreshToken {
   userId       String
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt    DateTime @default(now())
-  lastSeenAt   DateTime @default(now()) @updatedAt
+  lastSeenAt   DateTime @default(now())
   @@index([userId])
 }
 

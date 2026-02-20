@@ -46,7 +46,7 @@ const initializeSocket = async (io: Server) => {
         log(
           `User ${socket.data.userId} ${socket.id} started typing in conversation ${data.conversationId}`,
         );
-        io.to(data.conversationId).emit("typing:start", data);
+        socket.to(data.conversationId).emit("typing:start", data);
       },
     );
 
@@ -65,43 +65,54 @@ const initializeSocket = async (io: Server) => {
           return;
         }
 
-        io.to(data.conversationId).emit("typing:stop", data);
+        socket.to(data.conversationId).emit("typing:stop", data);
       },
     );
 
     socket.on(
       "conversation:join",
-      async ({
-        conversationId,
-        oldconversationId,
-      }: {
-        conversationId: string;
-        oldconversationId: string | null;
+      async (data: {
+        conversationId: string | string[];
+        oldConversationId?: string | null;
       }) => {
-        // Verify membership in the new conversation
-        const isParticipant = await ConversationService.isParticipant(
-          conversationId,
-          socket.data.userId,
+        // Handle both single ID and array of IDs
+        const conversationIds = Array.isArray(data.conversationId)
+          ? data.conversationId
+          : [data.conversationId];
+
+        // Verify membership in all conversations
+        const membershipChecks = await Promise.all(
+          conversationIds.map((id) =>
+            ConversationService.isParticipant(id, socket.data.userId),
+          ),
         );
 
-        if (!isParticipant) {
+        // Filter out conversations where user is not a participant
+        const validConversationIds = conversationIds.filter(
+          (_, index) => membershipChecks[index],
+        );
+
+        if (validConversationIds.length === 0) {
           socket.emit("error", {
-            message: "User is not a participant in this conversation",
+            message: "User is not a participant in any of these conversations",
           });
           return;
         }
 
-        if (oldconversationId) {
-          socket.leave(oldconversationId);
+        if (data.oldConversationId) {
+          socket.leave(data.oldConversationId);
           console.log(
-            `User ${socket.data.userId} ${socket.id} left conversation ${oldconversationId}`,
+            `User ${socket.data.userId} ${socket.id} left conversation ${data.oldConversationId}`,
           );
         }
-        socket.join(conversationId);
 
-        console.log(
-          `User ${socket.data.userId} ${socket.id} joined conversation ${conversationId}`,
-        );
+        // Join all valid conversations
+        validConversationIds.forEach((id) => {
+          socket.join(id);
+          console.log(
+            `User ${socket.data.userId} ${socket.id} joined conversation ${id}`,
+          );
+        });
       },
     );
 
@@ -183,6 +194,7 @@ const initializeSocket = async (io: Server) => {
         console.log(
           `User ${socket.data.userId} ${socket.id} sent message to conversation ${createdConversation.id}`,
         );
+        return;
       }
 
       if (conversationId) {

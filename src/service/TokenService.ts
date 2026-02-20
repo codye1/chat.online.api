@@ -83,5 +83,32 @@ class TokenService {
     });
     return token?.lastSeenAt || null;
   };
+
+  static getLastSeenAtBatch = async (
+    userIds: string[],
+  ): Promise<Map<string, Date | null>> => {
+    if (userIds.length === 0) {
+      return new Map();
+    }
+
+    const tokens = await prisma.refreshToken.findMany({
+      where: { userId: { in: userIds } },
+      select: { userId: true, lastSeenAt: true },
+      distinct: ["userId"],
+      orderBy: { lastSeenAt: "desc" },
+    });
+
+    const lastSeenMap = new Map<string, Date | null>();
+
+    // Initialize all userIds with null
+    userIds.forEach((id) => lastSeenMap.set(id, null));
+
+    // Override with actual values
+    tokens.forEach((token) => {
+      lastSeenMap.set(token.userId, token.lastSeenAt);
+    });
+
+    return lastSeenMap;
+  };
 }
 export default TokenService;

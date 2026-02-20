@@ -69,6 +69,18 @@ class ChatController {
   static async createConversation(req: Request, res: Response) {
     const { participantIds, title } = req.body;
     const userId = req.userId;
+
+    if (participantIds.length < 2) {
+      throw new ApiError(
+        400,
+        "INVALID_INPUT",
+        "At least 2 participants are required to create a conversation",
+      );
+    }
+
+    if (title && title.trim() === "")
+      throw new ApiError(400, "INVALID_INPUT", "Title cannot be empty");
+
     const conversation = await ConversationService.createConversation({
       participantIds,
       title,
@@ -142,10 +154,13 @@ class ChatController {
   static async search(req: Request, res: Response) {
     const { query } = req.query as { query: string };
 
-    const conversations = (
-      await ConversationService.getConversationsByUserId(req.userId)
-    ).filter((conversation) =>
-      conversation.title?.toLowerCase().includes(query.toLowerCase()),
+    if (!query || query.trim() === "") {
+      return res.json({ conversations: [], global: [] });
+    }
+
+    const conversations = await ConversationService.searchConversationsByUserId(
+      req.userId,
+      query,
     );
 
     const users: {

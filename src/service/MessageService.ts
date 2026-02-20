@@ -1,4 +1,3 @@
-import { log } from "node:console";
 import { prisma } from "../lib/prisma";
 
 class MessageService {
@@ -93,7 +92,6 @@ class MessageService {
         const items = [...olderMessages, ...newerMessages];
 
         const anchor = items.find((msg) => msg.id >= lastReadId)?.id;
-        log("Anchor message ID:", anchor);
         return {
           items,
           anchor,
