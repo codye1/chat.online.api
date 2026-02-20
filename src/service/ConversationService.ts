@@ -237,6 +237,11 @@ class ConversationService {
     title: string | null;
     userId: string;
   }): Promise<Conversation | null> {
+    const participantsHasAuthor = participantIds.includes(userId);
+    if (!participantsHasAuthor) {
+      throw new Error("Author must be included in participants");
+    }
+
     const conversation = await prisma.conversation.create({
       data: {
         title,

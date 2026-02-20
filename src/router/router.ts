@@ -1,6 +1,6 @@
 import { Router } from "express";
 import AuthController from "../controllers/AuthController";
-import ChatController from "../controllers/ChatContrroller";
+import ChatController from "../controllers/ChatController";
 import authMiddleware from "../middlewares/authMiddleware";
 import { prisma } from "../lib/prisma";
 

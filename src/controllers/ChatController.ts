@@ -12,6 +12,14 @@ class ChatController {
       recipientId?: string;
     };
 
+    if (!conversationId && !recipientId) {
+      throw new ApiError(
+        400,
+        "INVALID_INPUT",
+        "conversationId or recipientId is required",
+      );
+    }
+
     if (conversationId) {
       const conversation = await ConversationService.getConversationById(
         conversationId,
@@ -48,12 +56,6 @@ class ChatController {
 
       return res.json(conversation);
     }
-
-    throw new ApiError(
-      400,
-      "INVALID_INPUT",
-      "conversationId or userId is required",
-    );
   };
 
   static async getConversations(req: Request, res: Response) {
@@ -81,6 +83,18 @@ class ChatController {
     const senderId = req.userId;
     const { id: conversationId } = req.params;
 
+    const isParticipant = await ConversationService.isParticipant(
+      conversationId,
+      senderId,
+    );
+    if (!isParticipant) {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "You are not a participant of this conversation",
+      );
+    }
+
     const message = await MessageService.createMessage({
       conversationId,
       senderId,
@@ -96,8 +110,22 @@ class ChatController {
     const { cursor, direction, jumpToLatest } = req.query as {
       cursor?: string;
       direction?: "UP" | "DOWN";
-      jumpToLatest?: boolean;
+      jumpToLatest?: string;
     };
+
+    const parsedJumpToLatest =
+      typeof jumpToLatest === "string"
+        ? jumpToLatest.toLowerCase() === "true"
+        : undefined;
+
+    const isParticipant = await ConversationService.isParticipant(id, userId);
+    if (!isParticipant) {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "You are not a participant of this conversation",
+      );
+    }
 
     const messages = await MessageService.getMessagesByConversationId(
       id,
@@ -105,7 +133,7 @@ class ChatController {
       direction,
       userId,
       take,
-      jumpToLatest,
+      parsedJumpToLatest,
     );
 
     return res.json(messages);
@@ -120,12 +148,17 @@ class ChatController {
       conversation.title?.toLowerCase().includes(query.toLowerCase()),
     );
 
-    const users = (await UserService.getUsersByNicknameQuery(query)).map(
-      (user) => ({
-        type: "user",
-        ...user,
-      }),
-    );
+    const users: {
+      type: "user";
+      id: string;
+      nickname: string;
+      avatarUrl: string | null;
+    }[] = (await UserService.getUsersByNicknameQuery(query)).map((user) => ({
+      type: "user",
+      id: user.id,
+      nickname: user.nickname,
+      avatarUrl: user.avatarUrl,
+    }));
 
     const results = {
       conversations,

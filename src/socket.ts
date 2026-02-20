@@ -30,7 +30,19 @@ const initializeSocket = async (io: Server) => {
 
     socket.on(
       "typing:start",
-      (data: { conversationId: string; nickname: string }) => {
+      async (data: { conversationId: string; nickname: string }) => {
+        const isParticipant = await ConversationService.isParticipant(
+          data.conversationId,
+          socket.data.userId,
+        );
+
+        if (!isParticipant) {
+          socket.emit("error", {
+            message: "User is not a participant in this conversation",
+          });
+          return;
+        }
+
         log(
           `User ${socket.data.userId} ${socket.id} started typing in conversation ${data.conversationId}`,
         );
@@ -40,20 +52,45 @@ const initializeSocket = async (io: Server) => {
 
     socket.on(
       "typing:stop",
-      (data: { conversationId: string; nickname: string }) => {
+      async (data: { conversationId: string; nickname: string }) => {
+        const isParticipant = await ConversationService.isParticipant(
+          data.conversationId,
+          socket.data.userId,
+        );
+
+        if (!isParticipant) {
+          socket.emit("error", {
+            message: "User is not a participant in this conversation",
+          });
+          return;
+        }
+
         io.to(data.conversationId).emit("typing:stop", data);
       },
     );
 
     socket.on(
       "conversation:join",
-      ({
+      async ({
         conversationId,
         oldconversationId,
       }: {
         conversationId: string;
         oldconversationId: string | null;
       }) => {
+        // Verify membership in the new conversation
+        const isParticipant = await ConversationService.isParticipant(
+          conversationId,
+          socket.data.userId,
+        );
+
+        if (!isParticipant) {
+          socket.emit("error", {
+            message: "User is not a participant in this conversation",
+          });
+          return;
+        }
+
         if (oldconversationId) {
           socket.leave(oldconversationId);
           console.log(
@@ -68,7 +105,20 @@ const initializeSocket = async (io: Server) => {
       },
     );
 
-    socket.on("conversation:leave", (conversationId: string) => {
+    socket.on("conversation:leave", async (conversationId: string) => {
+      // Verify membership before allowing leave
+      const isParticipant = await ConversationService.isParticipant(
+        conversationId,
+        socket.data.userId,
+      );
+
+      if (!isParticipant) {
+        socket.emit("error", {
+          message: "User is not a participant in this conversation",
+        });
+        return;
+      }
+
       socket.leave(conversationId);
       console.log(
         `User ${socket.data.userId} ${socket.id} left conversation ${conversationId}`,
@@ -136,6 +186,19 @@ const initializeSocket = async (io: Server) => {
       }
 
       if (conversationId) {
+        // Verify membership before sending message
+        const isParticipant = await ConversationService.isParticipant(
+          conversationId,
+          socket.data.userId,
+        );
+
+        if (!isParticipant) {
+          socket.emit("error", {
+            message: "User is not a participant in this conversation",
+          });
+          return;
+        }
+
         const message = await MessageService.createMessage({
           conversationId,
           senderId: socket.data.userId,
