@@ -24,6 +24,10 @@ const initializeSocket = async (io: Server) => {
       socket.join(`lastSeenAt:${userId}`);
     });
 
+    socket.on("unsubscribe:lastSeenAt", async (userId: string) => {
+      socket.leave(`lastSeenAt:${userId}`);
+    });
+
     socket.on(
       "typing:start",
       (data: { conversationId: string; nickname: string }) => {
@@ -104,7 +108,10 @@ const initializeSocket = async (io: Server) => {
           });
 
         if (!createdConversation) {
-          throw new Error("Failed to create conversation");
+          socket.emit("conversation:error", {
+            message: "Failed to create conversation",
+          });
+          return;
         }
 
         socket.to(recipientId).emit("conversation:new", {
@@ -145,25 +152,53 @@ const initializeSocket = async (io: Server) => {
     socket.on("message:read", async (data) => {
       const { conversationId, lastReadMessageId } = data;
 
-      const message = await MessageService.getMessageById(lastReadMessageId);
+      try {
+        const message = await MessageService.getMessageById(lastReadMessageId);
 
-      io.to(conversationId).emit("message:read", {
-        conversationId,
-        lastReadMessage: {
-          id: message.id,
-          senderId: message.senderId,
-        },
-      });
+        // Validate message belongs to the conversation
+        if (message.conversationId !== conversationId) {
+          socket.emit("error", {
+            message: "Message does not belong to the specified conversation",
+          });
+          return;
+        }
 
-      await MessageService.markMessagesAsRead({
-        conversationId,
-        userId: socket.data.userId,
-        lastReadMessageId,
-      });
+        // Validate user is a participant
+        const isParticipant = await ConversationService.isParticipant(
+          conversationId,
+          socket.data.userId,
+        );
 
-      console.log(
-        `User ${socket.data.userId} ${socket.id} read messages in conversation ${conversationId}`,
-      );
+        if (!isParticipant) {
+          socket.emit("error", {
+            message: "User is not a participant in this conversation",
+          });
+          return;
+        }
+
+        io.to(conversationId).emit("message:read", {
+          conversationId,
+          lastReadMessage: {
+            id: message.id,
+            senderId: message.senderId,
+          },
+        });
+
+        await MessageService.markMessagesAsRead({
+          conversationId,
+          userId: socket.data.userId,
+          lastReadMessageId,
+        });
+
+        console.log(
+          `User ${socket.data.userId} ${socket.id} read messages in conversation ${conversationId}`,
+        );
+      } catch (error) {
+        console.error("Error in message:read handler:", error);
+        socket.emit("error", {
+          message: "Failed to mark messages as read",
+        });
+      }
     });
   });
 };

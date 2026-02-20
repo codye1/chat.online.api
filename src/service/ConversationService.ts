@@ -161,8 +161,11 @@ class ConversationService {
     conversationId: string,
     userId: string,
   ): Promise<Conversation | null> {
-    const conversation = await prisma.conversation.findUnique({
-      where: { id: conversationId },
+    const conversation = await prisma.conversation.findFirst({
+      where: {
+        id: conversationId,
+        participants: { some: { userId } },
+      },
       include: {
         participants: {
           // we need 1 user who userId===userId and 1 random user but not userId===userId
@@ -265,6 +268,16 @@ class ConversationService {
     if (!conversation) return null;
 
     return this.mapConversationToDto(conversation, userId);
+  }
+
+  static async isParticipant(
+    conversationId: string,
+    userId: string,
+  ): Promise<boolean> {
+    const participant = await prisma.conversationParticipant.findUnique({
+      where: { userId_conversationId: { userId, conversationId } },
+    });
+    return !!participant;
   }
 }
 
