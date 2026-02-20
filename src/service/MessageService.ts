@@ -58,6 +58,7 @@ class MessageService {
           items: messages,
           hasMoreUp: false,
           hasMoreDown: messages.length === take,
+          anchor: messages[0]?.id,
         };
       }
 
@@ -135,6 +136,14 @@ class MessageService {
       where: { userId_conversationId: { userId, conversationId } },
       data: { lastReadMessageId },
     });
+  }
+
+  static async getMessageById(id: string) {
+    const message = await prisma.message.findUnique({
+      where: { id },
+    });
+    if (!message) throw new Error("Message not found");
+    return message;
   }
 }
 

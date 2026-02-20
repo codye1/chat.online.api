@@ -1,11 +1,45 @@
 import { Server } from "socket.io";
 import MessageService from "./service/MessageService";
 import ConversationService from "./service/ConversationService";
-
+import TokenService from "./service/TokenService";
+import { log } from "node:console";
 const initializeSocket = async (io: Server) => {
   io.on("connect", (socket) => {
     console.log(`User connected: ${socket.data.userId}`);
+    TokenService.updateLastSeenAt(socket.data.userId);
     socket.join(socket.data.userId);
+
+    socket.on("lastSeenAt:update", () => {
+      TokenService.updateLastSeenAt(socket.data.userId);
+      io.to(`lastSeenAt:${socket.data.userId}`).emit("lastSeenAt:update", {
+        userId: socket.data.userId,
+        lastSeenAt: new Date(),
+      });
+    });
+
+    socket.on("subscribe:lastSeenAt", async (userId: string) => {
+      log(
+        `User ${socket.data.userId} ${socket.id} subscribed to lastSeenAt updates for user ${userId}`,
+      );
+      socket.join(`lastSeenAt:${userId}`);
+    });
+
+    socket.on(
+      "typing:start",
+      (data: { conversationId: string; nickname: string }) => {
+        log(
+          `User ${socket.data.userId} ${socket.id} started typing in conversation ${data.conversationId}`,
+        );
+        io.to(data.conversationId).emit("typing:start", data);
+      },
+    );
+
+    socket.on(
+      "typing:stop",
+      (data: { conversationId: string; nickname: string }) => {
+        io.to(data.conversationId).emit("typing:stop", data);
+      },
+    );
 
     socket.on(
       "conversation:join",
@@ -110,11 +144,15 @@ const initializeSocket = async (io: Server) => {
 
     socket.on("message:read", async (data) => {
       const { conversationId, lastReadMessageId } = data;
-      console.log(lastReadMessageId);
+
+      const message = await MessageService.getMessageById(lastReadMessageId);
 
       io.to(conversationId).emit("message:read", {
         conversationId,
-        lastReadMessageId,
+        lastReadMessage: {
+          id: message.id,
+          senderId: message.senderId,
+        },
       });
 
       await MessageService.markMessagesAsRead({
@@ -126,10 +164,6 @@ const initializeSocket = async (io: Server) => {
       console.log(
         `User ${socket.data.userId} ${socket.id} read messages in conversation ${conversationId}`,
       );
-    });
-
-    socket.on("disconnect", () => {
-      console.log(`User disconnected: ${socket.data.userId} ${socket.id}`);
     });
   });
 };

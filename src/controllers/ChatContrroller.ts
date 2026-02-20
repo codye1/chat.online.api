@@ -36,7 +36,13 @@ class ChatController {
         return res.json({
           id: null,
           title: recipient.nickname,
-          avatarUrl: recipient.avatarUrl,
+          type: "DIRECT",
+          otherParticipant: {
+            id: recipient.id,
+            nickname: recipient.nickname,
+            avatarUrl: recipient.avatarUrl,
+            lastSeenAt: recipient.refreshTokens[0]?.lastSeenAt || null,
+          },
         });
       }
 

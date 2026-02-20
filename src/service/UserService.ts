@@ -44,6 +44,12 @@ class UserService {
   static async getUserById(id: string) {
     return await prisma.user.findUnique({
       where: { id },
+      include: {
+        refreshTokens: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+      },
     });
   }
 

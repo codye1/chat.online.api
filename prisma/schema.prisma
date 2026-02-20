@@ -35,7 +35,7 @@ model RefreshToken {
   userId       String
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt    DateTime @default(now())
-
+  lastSeenAt   DateTime @default(now()) @updatedAt
   @@index([userId])
 }
 
@@ -52,12 +52,17 @@ model Message {
   @@index([senderId])
 }
 
+enum ConversationType {
+  DIRECT
+  GROUP
+}
+
 model Conversation {
-  id           String      @id @default(cuid())
-  title        String  ?
-  type         String    @default("DIRECT")
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  id           String             @id @default(cuid())
+  title        String?
+  type         ConversationType   @default(DIRECT)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
   participants ConversationParticipant[]
   messages     Message[]
 }

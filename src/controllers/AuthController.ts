@@ -118,7 +118,6 @@ class AuthController {
     const savedToken = await TokenService.findRefreshToken(refreshToken);
     if (!savedToken)
       throw new ApiError(401, "UNAUTHORIZED_REFRESH", "Invalid refresh token");
-
     const user = await UserService.getUserById(tokenData.userId);
     if (!user) throw new ApiError(404, "NOT_FOUND", "User not found");
     await TokenService.removeRefreshToken(refreshToken);
