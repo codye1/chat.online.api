@@ -1,6 +1,7 @@
 import { Router } from "express";
 import AuthController from "../controllers/AuthController";
 import ChatController from "../controllers/ChatController";
+import UserController from "../controllers/UserController";
 import authMiddleware from "../middlewares/authMiddleware";
 import { prisma } from "../lib/prisma";
 
@@ -20,6 +21,9 @@ router.post("/auth/login", AuthController.login);
 router.post("/auth/refresh", AuthController.refreshToken);
 router.post("/auth/logout", AuthController.logout);
 router.post("/auth/google", AuthController.googleAuth);
+
+router.get("/user/me", authMiddleware, UserController.getMe);
+router.patch("/user", authMiddleware, UserController.updateUser);
 
 router.get(
   "/chat/conversation",

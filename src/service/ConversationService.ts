@@ -1,5 +1,15 @@
 import { prisma } from "../lib/prisma";
 
+interface User {
+  id: string;
+  email: string;
+  nickname: string;
+  avatarUrl: string | null;
+  lastName: string | null;
+  firstName: string | null;
+  biography: string | null;
+}
+
 interface ConversationsItem {
   id: string;
   title: string;
@@ -16,12 +26,12 @@ interface Conversation {
   title: string;
   avatarUrl: string | null;
   participants: {
-    user: { id: string; nickname: string; avatarUrl: string | null };
+    user: User;
   }[];
   lastReadId: string | null;
   lastReadIdByParticipants: string | null;
   unreadMessages?: number;
-  otherParticipant?: { id: string; nickname: string; avatarUrl: string | null };
+  otherParticipant?: User;
   lastSeenAt: Date | null;
 }
 
@@ -32,10 +42,7 @@ interface ConversationWithParticipants {
   participants: {
     userId: string;
     lastReadMessageId: string | null;
-    user: {
-      id: string;
-      nickname: string;
-      avatarUrl: string | null;
+    user: User & {
       refreshTokens?: { lastSeenAt: Date }[];
     };
   }[];
@@ -122,8 +129,12 @@ class ConversationService {
             user: {
               select: {
                 id: true,
+                email: true,
                 nickname: true,
                 avatarUrl: true,
+                lastName: true,
+                firstName: true,
+                biography: true,
                 refreshTokens: {
                   orderBy: { lastSeenAt: "desc" },
                   take: 1,
@@ -212,8 +223,12 @@ class ConversationService {
             user: {
               select: {
                 id: true,
+                email: true,
                 nickname: true,
                 avatarUrl: true,
+                lastName: true,
+                firstName: true,
+                biography: true,
                 refreshTokens: {
                   orderBy: { lastSeenAt: "desc" },
                   take: 1,
@@ -287,8 +302,12 @@ class ConversationService {
             user: {
               select: {
                 id: true,
+                email: true,
                 nickname: true,
                 avatarUrl: true,
+                lastName: true,
+                firstName: true,
+                biography: true,
                 refreshTokens: {
                   orderBy: { lastSeenAt: "desc" },
                   take: 1,
@@ -330,8 +349,12 @@ class ConversationService {
             user: {
               select: {
                 id: true,
+                email: true,
                 nickname: true,
                 avatarUrl: true,
+                lastName: true,
+                firstName: true,
+                biography: true,
                 refreshTokens: {
                   orderBy: { lastSeenAt: "desc" },
                   take: 1,
@@ -382,8 +405,12 @@ class ConversationService {
             user: {
               select: {
                 id: true,
+                email: true,
                 nickname: true,
                 avatarUrl: true,
+                lastName: true,
+                firstName: true,
+                biography: true,
                 refreshTokens: {
                   orderBy: { lastSeenAt: "desc" },
                   take: 1,

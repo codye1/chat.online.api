@@ -18,6 +18,9 @@ model User {
   email         String         @unique
   nickname      String         @unique
   password      String  ?
+  lastName      String  ?
+  firstName     String  ?
+  biography     String  ?
   avatarUrl   String  ?
 
   provider      String   @default("LOCAL")
