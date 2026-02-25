@@ -10,15 +10,11 @@ class UserController {
     const { nickname, firstName, lastName, biography, avatarUrl } = req.body;
 
     if (
-      !nickname &&
-      !firstName &&
-      firstName !== "" &&
-      !lastName &&
-      lastName !== "" &&
-      !biography &&
-      biography !== "" &&
-      !avatarUrl &&
-      avatarUrl !== ""
+      nickname === undefined &&
+      firstName === undefined &&
+      lastName === undefined &&
+      biography === undefined &&
+      avatarUrl === undefined
     ) {
       throw new ApiError(
         400,
@@ -34,7 +30,9 @@ class UserController {
       biography?: string | null;
       avatarUrl?: string | null;
     } = {};
-
+    if (nickname !== undefined && (!nickname || nickname.trim() === "")) {
+      throw new ApiError(400, "INVALID_INPUT", "Nickname cannot be empty");
+    }
     if (nickname !== undefined) updateData.nickname = nickname;
     if (firstName !== undefined) updateData.firstName = firstName || null;
     if (lastName !== undefined) updateData.lastName = lastName || null;
