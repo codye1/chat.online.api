@@ -23,11 +23,13 @@ model User {
   biography     String  ?
   avatarUrl   String  ?
 
+  lastSeenAt   DateTime @default(now())
+
   provider      String   @default("LOCAL")
 
   createdAt     DateTime @default(now())
   refreshTokens RefreshToken[]
-
+  reactions     Reaction[]
   sentMessages     Message[]
   conversations    ConversationParticipant[]
 }
@@ -38,7 +40,6 @@ model RefreshToken {
   userId       String
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt    DateTime @default(now())
-  lastSeenAt   DateTime @default(now())
   @@index([userId])
 }
 
@@ -48,11 +49,32 @@ model Message {
   senderId       String
   text        String
   createdAt      DateTime     @default(now())
+  replyToMessageId String?
+
+  replyTo Message?             @relation("MessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies Message[]            @relation("MessageReplies")
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
 
+  reactions      Reaction[]
+
   @@index([conversationId])
   @@index([senderId])
+}
+
+model Reaction {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  content  String
+
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@index([userId])
 }
 
 enum ConversationType {
@@ -67,6 +89,7 @@ model Conversation {
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
   participants ConversationParticipant[]
+  avatarUrl   String?
   messages     Message[]
 }
 

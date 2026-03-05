@@ -3,6 +3,7 @@ import MessageService from "../service/MessageService";
 import ConversationService from "../service/ConversationService";
 import UserService from "../service/UserService";
 import ApiError from "../utils/ApiError";
+import ReactionService from "../service/ReactionService";
 
 class ChatController {
   static getConversation = async (req: Request, res: Response) => {
@@ -42,15 +43,16 @@ class ChatController {
         }
 
         return res.json({
-          id: null,
+          id: "tempId:" + recipientId,
           title: recipient.nickname,
           type: "DIRECT",
           otherParticipant: {
             id: recipient.id,
             nickname: recipient.nickname,
             avatarUrl: recipient.avatarUrl,
-            lastSeenAt: recipient.refreshTokens[0]?.lastSeenAt || null,
+            lastSeenAt: recipient.lastSeenAt,
           },
+          activeUsers: [],
         });
       }
 
@@ -141,9 +143,9 @@ class ChatController {
 
     const messages = await MessageService.getMessagesByConversationId(
       id,
+      userId,
       cursor,
       direction,
-      userId,
       take,
       parsedJumpToLatest,
     );
@@ -180,6 +182,36 @@ class ChatController {
       global: users,
     };
     return res.json(results);
+  }
+
+  static async getMessageReactions(
+    req: Request<{
+      messageId: string;
+      reactionContent: string;
+      cursor?: string;
+    }>,
+    res: Response,
+  ) {
+    const { messageId } = req.params;
+    const { reactionContent, cursor, take } = req.query as {
+      reactionContent?: string;
+      cursor?: string;
+      take?: number;
+    };
+
+    console.log({
+      messageId,
+      reactionContent,
+      cursor,
+    });
+
+    const reactions = await ReactionService.getReactorsByMessage({
+      messageId,
+      reactionContent,
+      cursor,
+      take: take ?? 20,
+    });
+    return res.json(reactions);
   }
 }
 

@@ -55,7 +55,7 @@ class AuthController {
       safeUser.id,
     );
 
-    return res.json({ accessToken, safeUser });
+    return res.json({ accessToken, user: safeUser });
   }
 
   static async login(req: Request, res: Response) {

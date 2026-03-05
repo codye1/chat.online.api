@@ -1,54 +1,88 @@
 import { prisma } from "../lib/prisma";
-
-interface User {
-  id: string;
-  email: string;
-  nickname: string;
-  avatarUrl: string | null;
-  lastName: string | null;
-  firstName: string | null;
-  biography: string | null;
-}
-
-interface ConversationsItem {
-  id: string;
-  title: string;
-  type: "DIRECT" | "GROUP";
-  avatarUrl: string | null;
-  unreadMessages: number;
-  lastMessage: { text: string; createdAt: Date } | null;
-  lastSeenAt: Date | null;
-}
-
-interface Conversation {
-  id: string;
-  type: "DIRECT" | "GROUP";
-  title: string;
-  avatarUrl: string | null;
-  participants: {
-    user: User;
-  }[];
-  lastReadId: string | null;
-  lastReadIdByParticipants: string | null;
-  unreadMessages?: number;
-  otherParticipant?: User;
-  lastSeenAt: Date | null;
-}
-
-interface ConversationWithParticipants {
-  id: string;
-  type: "DIRECT" | "GROUP";
-  title: string | null;
-  participants: {
-    userId: string;
-    lastReadMessageId: string | null;
-    user: User & {
-      refreshTokens?: { lastSeenAt: Date }[];
-    };
-  }[];
-}
+import { Prisma } from "../../generated/prisma/client";
+import ApiError from "../utils/ApiError";
+import {
+  Conversation,
+  ConversationPreview,
+  ConversationTypes,
+  ConversationWithParticipants,
+} from "../types/types";
 
 class ConversationService {
+  private static async mapConversationsToPreview(
+    conversations: ConversationWithParticipants[],
+    userId: string,
+  ): Promise<ConversationPreview[]> {
+    const conversationIds = conversations.map((c) => c.id);
+
+    const unreadRows = conversationIds.length
+      ? await prisma.$queryRaw<{ conversationId: string; count: number }[]>(
+          Prisma.sql`
+            SELECT m."conversationId", COUNT(*)::int AS count
+            FROM "Message" m
+            JOIN "ConversationParticipant" cp
+              ON cp."conversationId" = m."conversationId"
+              AND cp."userId" = ${userId}
+            WHERE m."senderId" != ${userId}
+              AND (cp."lastReadMessageId" IS NULL OR m.id > cp."lastReadMessageId")
+              AND m."conversationId" IN (${Prisma.join(conversationIds)})
+            GROUP BY m."conversationId"
+          `,
+        )
+      : [];
+
+    const unreadMap = new Map(
+      unreadRows.map((r) => [r.conversationId, Number(r.count)]),
+    );
+
+    return conversations.map((conversation) => {
+      const otherParticipant = conversation.participants.find(
+        (p) => p.userId !== userId,
+      );
+
+      const lastMessage = conversation.messages?.[0]
+        ? {
+            id: conversation.messages[0].id,
+            text: conversation.messages[0].text,
+            createdAt: conversation.messages[0].createdAt.toISOString(),
+          }
+        : null;
+
+      const unreadCount = unreadMap.get(conversation.id) ?? 0;
+
+      if (conversation.type === "DIRECT") {
+        if (!otherParticipant) {
+          throw new ApiError(
+            500,
+            "CONVERSATION_PARTICIPANT_NOT_FOUND",
+            "Conversation participant not found",
+          );
+        }
+
+        return {
+          id: conversation.id,
+          type: "DIRECT" as const,
+          title: conversation.title ?? otherParticipant.user.nickname,
+          avatarUrl: conversation.avatarUrl ?? otherParticipant.user.avatarUrl,
+          unreadMessages: unreadCount,
+          lastMessage,
+          activeUsers: [],
+          otherParticipant: { id: otherParticipant.user.id },
+        };
+      }
+
+      return {
+        id: conversation.id,
+        type: "GROUP" as const,
+        title: conversation.title ?? "",
+        avatarUrl: conversation.avatarUrl,
+        unreadMessages: unreadCount,
+        lastMessage,
+        activeUsers: [],
+      };
+    });
+  }
+
   private static async mapConversationToDto(
     conversation: ConversationWithParticipants,
     userId: string,
@@ -58,17 +92,21 @@ class ConversationService {
       (p) => p.userId !== userId,
     )?.user;
 
-    const title =
-      conversation.title ??
-      (otherParticipant?.nickname ? otherParticipant.nickname : "");
-
-    const avatarUrl = otherParticipant?.avatarUrl
-      ? otherParticipant.avatarUrl
-      : null;
-
     const myParticipant = conversation.participants.find(
       (p) => p.userId === userId,
     );
+
+    if (!otherParticipant || !myParticipant) {
+      throw new ApiError(
+        500,
+        "CONVERSATION_PARTICIPANT_NOT_FOUND",
+        "Conversation participant not found",
+      );
+    }
+
+    const title = conversation.title ?? otherParticipant.nickname;
+
+    const avatarUrl = conversation.avatarUrl ?? otherParticipant.avatarUrl;
 
     const [lastReadIdByParticipants, unreadCount] = await Promise.all([
       prisma.conversationParticipant.findMany({
@@ -95,26 +133,48 @@ class ConversationService {
 
     const lastSeenAt =
       conversation.type === "DIRECT" && otherParticipant
-        ? (otherParticipant.refreshTokens?.[0]?.lastSeenAt ?? null)
+        ? otherParticipant.lastSeenAt
         : null;
 
-    return {
-      ...conversation,
-      title,
+    const lastMessage = conversation.messages?.[0] ?? null;
+
+    const baseConversation = {
+      id: conversation.id,
       avatarUrl,
+      title,
+      type: conversation.type as ConversationTypes,
+      unreadMessages: unreadCount || 0,
+      lastMessage: lastMessage
+        ? {
+            id: lastMessage.id,
+            text: lastMessage.text,
+            createdAt: lastMessage.createdAt.toISOString(),
+          }
+        : null,
       lastReadId: myParticipant?.lastReadMessageId ?? null,
-      unreadMessages: unreadCount,
       lastReadIdByParticipants:
         lastReadIdByParticipants[0]?.lastReadMessageId ?? null,
-      lastSeenAt,
-      otherParticipant:
-        conversation.type === "DIRECT" ? otherParticipant : undefined,
+      activeUsers: [] as { nickname: string; reason: "typing" | "editing" }[],
     };
+
+    if (conversation.type === "DIRECT") {
+      return {
+        ...baseConversation,
+        type: "DIRECT" as const,
+        lastSeenAt,
+        otherParticipant,
+      };
+    } else {
+      return {
+        ...baseConversation,
+        type: "GROUP" as const,
+      };
+    }
   }
 
   static async getConversationsByUserId(
     userId: string,
-  ): Promise<ConversationsItem[]> {
+  ): Promise<ConversationPreview[]> {
     const conversations = await prisma.conversation.findMany({
       where: {
         participants: { some: { userId } },
@@ -135,11 +195,7 @@ class ConversationService {
                 lastName: true,
                 firstName: true,
                 biography: true,
-                refreshTokens: {
-                  orderBy: { lastSeenAt: "desc" },
-                  take: 1,
-                  select: { lastSeenAt: true },
-                },
+                lastSeenAt: true,
               },
             },
           },
@@ -151,47 +207,13 @@ class ConversationService {
       },
     });
 
-    const conversationsWithUnread = await Promise.all(
-      conversations.map(async (conversation) => {
-        const myParticipant = conversation.participants.find(
-          (p) => p.userId === userId,
-        );
-        const otherParticipant = conversation.participants.find(
-          (p) => p.userId !== userId,
-        );
-        const unreadCount = await prisma.message.count({
-          where: {
-            conversationId: conversation.id,
-            senderId: { not: userId },
-            id: {
-              gt: myParticipant?.lastReadMessageId ?? "",
-            },
-          },
-        });
-
-        const lastSeenAt =
-          conversation.type === "DIRECT" && otherParticipant
-            ? (otherParticipant.user.refreshTokens[0]?.lastSeenAt ?? null)
-            : null;
-
-        return {
-          ...conversation,
-          title: conversation.title ?? otherParticipant?.user.nickname ?? "",
-          avatarUrl: otherParticipant?.user.avatarUrl ?? null,
-          lastMessage: conversation.messages[0] ?? null,
-          unreadMessages: unreadCount,
-          lastSeenAt,
-        };
-      }),
-    );
-
-    return conversationsWithUnread;
+    return this.mapConversationsToPreview(conversations, userId);
   }
 
   static async searchConversationsByUserId(
     userId: string,
     query: string,
-  ): Promise<ConversationsItem[]> {
+  ): Promise<ConversationPreview[]> {
     const conversations = await prisma.conversation.findMany({
       where: {
         participants: { some: { userId } },
@@ -229,11 +251,7 @@ class ConversationService {
                 lastName: true,
                 firstName: true,
                 biography: true,
-                refreshTokens: {
-                  orderBy: { lastSeenAt: "desc" },
-                  take: 1,
-                  select: { lastSeenAt: true },
-                },
+                lastSeenAt: true,
               },
             },
           },
@@ -245,41 +263,7 @@ class ConversationService {
       },
     });
 
-    const conversationsWithUnread = await Promise.all(
-      conversations.map(async (conversation) => {
-        const myParticipant = conversation.participants.find(
-          (p) => p.userId === userId,
-        );
-        const otherParticipant = conversation.participants.find(
-          (p) => p.userId !== userId,
-        );
-        const unreadCount = await prisma.message.count({
-          where: {
-            conversationId: conversation.id,
-            senderId: { not: userId },
-            id: {
-              gt: myParticipant?.lastReadMessageId ?? "",
-            },
-          },
-        });
-
-        const lastSeenAt =
-          conversation.type === "DIRECT" && otherParticipant
-            ? (otherParticipant.user.refreshTokens[0]?.lastSeenAt ?? null)
-            : null;
-
-        return {
-          ...conversation,
-          title: conversation.title ?? otherParticipant?.user.nickname ?? "",
-          avatarUrl: otherParticipant?.user.avatarUrl ?? null,
-          lastMessage: conversation.messages[0] ?? null,
-          unreadMessages: unreadCount,
-          lastSeenAt,
-        };
-      }),
-    );
-
-    return conversationsWithUnread;
+    return this.mapConversationsToPreview(conversations, userId);
   }
 
   static async getConversationById(
@@ -308,14 +292,14 @@ class ConversationService {
                 lastName: true,
                 firstName: true,
                 biography: true,
-                refreshTokens: {
-                  orderBy: { lastSeenAt: "desc" },
-                  take: 1,
-                  select: { lastSeenAt: true },
-                },
+                lastSeenAt: true,
               },
             },
           },
+        },
+        messages: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
         },
       },
     });
@@ -339,6 +323,10 @@ class ConversationService {
         },
       },
       include: {
+        messages: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
         participants: {
           // we need 1 user who userId===userId and 1 random user but not userId===userId
           where: {
@@ -355,11 +343,7 @@ class ConversationService {
                 lastName: true,
                 firstName: true,
                 biography: true,
-                refreshTokens: {
-                  orderBy: { lastSeenAt: "desc" },
-                  take: 1,
-                  select: { lastSeenAt: true },
-                },
+                lastSeenAt: true,
               },
             },
           },
@@ -395,6 +379,10 @@ class ConversationService {
         },
       },
       include: {
+        messages: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
         participants: {
           // we need 1 user who userId===userId and 1 random user but not userId===userId
           where: {
@@ -411,11 +399,7 @@ class ConversationService {
                 lastName: true,
                 firstName: true,
                 biography: true,
-                refreshTokens: {
-                  orderBy: { lastSeenAt: "desc" },
-                  take: 1,
-                  select: { lastSeenAt: true },
-                },
+                lastSeenAt: true,
               },
             },
           },

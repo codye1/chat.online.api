@@ -53,6 +53,12 @@ router.get(
   ChatController.getMessages,
 );
 
+router.get(
+  "/chat/conversations/:conversationId/messages/:messageId/reactors",
+  authMiddleware,
+  ChatController.getMessageReactions,
+);
+
 router.get("/chat/search", authMiddleware, ChatController.search);
 
 router.get("/protected", authMiddleware, async (req, res) => {

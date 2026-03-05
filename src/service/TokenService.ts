@@ -67,48 +67,5 @@ class TokenService {
     });
     return token;
   };
-
-  static updateLastSeenAt = async (userId: string) => {
-    const token = await prisma.refreshToken.updateMany({
-      where: { userId },
-      data: { lastSeenAt: new Date() },
-    });
-    return token;
-  };
-
-  static getLastSeenAt = async (userId: string) => {
-    const token = await prisma.refreshToken.findFirst({
-      where: { userId },
-      select: { lastSeenAt: true },
-    });
-    return token?.lastSeenAt || null;
-  };
-
-  static getLastSeenAtBatch = async (
-    userIds: string[],
-  ): Promise<Map<string, Date | null>> => {
-    if (userIds.length === 0) {
-      return new Map();
-    }
-
-    const tokens = await prisma.refreshToken.findMany({
-      where: { userId: { in: userIds } },
-      select: { userId: true, lastSeenAt: true },
-      distinct: ["userId"],
-      orderBy: { lastSeenAt: "desc" },
-    });
-
-    const lastSeenMap = new Map<string, Date | null>();
-
-    // Initialize all userIds with null
-    userIds.forEach((id) => lastSeenMap.set(id, null));
-
-    // Override with actual values
-    tokens.forEach((token) => {
-      lastSeenMap.set(token.userId, token.lastSeenAt);
-    });
-
-    return lastSeenMap;
-  };
 }
 export default TokenService;

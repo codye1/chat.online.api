@@ -44,12 +44,6 @@ class UserService {
   static async getUserById(id: string) {
     return await prisma.user.findUnique({
       where: { id },
-      include: {
-        refreshTokens: {
-          orderBy: { createdAt: "desc" },
-          take: 1,
-        },
-      },
     });
   }
 
@@ -71,6 +65,20 @@ class UserService {
       take: 10,
     });
   }
+
+  static updateLastSeenAt = async (userId: string) => {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { lastSeenAt: new Date() },
+    });
+  };
+
+  static getLastSeenAt = async (userId: string) => {
+    return await prisma.user.findUnique({
+      where: { id: userId },
+      select: { lastSeenAt: true },
+    });
+  };
 }
 
 export default UserService;
