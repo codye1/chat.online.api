@@ -150,6 +150,7 @@ class ReactionService {
           ? JSON.parse(row.reaction)
           : row.reaction,
     }));
+    console.log(items.length);
 
     const hasMore = items.length > take;
     if (hasMore) items.pop();

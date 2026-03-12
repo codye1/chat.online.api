@@ -16,9 +16,15 @@ interface BaseConversationData {
   title: string;
   type: ConversationTypes;
   unreadMessages: number;
+  isArchived: boolean;
+  isMuted: boolean;
   lastMessage: { text: string; createdAt: string; id: string } | null;
   activeUsers: { nickname: string; reason: "typing" | "editing" }[];
 }
+
+type EditableConversationSettings = Partial<
+  Pick<BaseConversationData, "isArchived" | "isMuted">
+>;
 
 interface BaseConversation extends BaseConversationData {
   lastReadId: string | null;
@@ -50,6 +56,28 @@ interface GroupPreview extends BaseConversationData {
 
 type ConversationPreview = DirectPreview | GroupPreview;
 
+interface FolderDto {
+  id: string;
+  title: string;
+  position: number;
+  icon?: string;
+  pinnedConversationIds: string[];
+  unpinnedConversationIds: string[];
+}
+
+interface ConversationsInit {
+  byId: Record<string, ConversationPreview>;
+  activeIds: {
+    pinned: string[];
+    unpinned: string[];
+  };
+  archivedIds: {
+    pinned: string[];
+    unpinned: string[];
+  };
+  folders: FolderDto[];
+}
+
 interface ConversationWithParticipants {
   id: string;
   type: "DIRECT" | "GROUP";
@@ -60,6 +88,8 @@ interface ConversationWithParticipants {
     userId: string;
     lastReadMessageId: string | null;
     user: User;
+    isMuted: boolean;
+    isArchived: boolean;
   }[];
 }
 
@@ -106,11 +136,14 @@ export type {
   User,
   Conversation,
   ConversationPreview,
+  ConversationsInit,
   ConversationWithParticipants,
   ConversationTypes,
+  FolderDto,
   Message,
   GroupedReactions,
   UserPreview,
   Reaction,
   ReactorListItem,
+  EditableConversationSettings,
 };

@@ -28,6 +28,8 @@ model User {
   provider      String   @default("LOCAL")
 
   createdAt     DateTime @default(now())
+
+  folders         Folder[]
   refreshTokens RefreshToken[]
   reactions     Reaction[]
   sentMessages     Message[]
@@ -50,6 +52,7 @@ model Message {
   text        String
   createdAt      DateTime     @default(now())
   replyToMessageId String?
+
 
   replyTo Message?             @relation("MessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
   replies Message[]            @relation("MessageReplies")
@@ -89,15 +92,22 @@ model Conversation {
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
   participants ConversationParticipant[]
+  lastMessageId String?
   avatarUrl   String?
+
+
   messages     Message[]
+  folderConversations FolderConversation[]
 }
 
 model ConversationParticipant {
   id             String       @id @default(cuid())
   userId         String
   conversationId String
-
+  pinnedPosition Int?
+  archivedPinnedPosition Int?
+  isArchived       Boolean      @default(false)
+  isMuted          Boolean      @default(false)
   lastReadMessageId String?
 
 
@@ -107,5 +117,33 @@ model ConversationParticipant {
 
 
   @@unique([userId, conversationId])
+  @@index([conversationId])
+}
+
+model Folder {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  icon      String?
+  position  Int
+  createdAt DateTime @default(now())
+
+  user              User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folderConversations FolderConversation[]
+
+  @@index([userId])
+  @@unique([userId, position])
+}
+
+model FolderConversation {
+  id             String   @id @default(cuid())
+  folderId       String
+  conversationId String
+  folder         Folder       @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  pinnedPosition Int?
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([folderId, conversationId])
+  @@index([folderId])
   @@index([conversationId])
 }
