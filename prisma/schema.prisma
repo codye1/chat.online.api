@@ -53,7 +53,7 @@ model Message {
   createdAt      DateTime     @default(now())
   replyToMessageId String?
 
-
+  media          MessageMedia[]
   replyTo Message?             @relation("MessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
   replies Message[]            @relation("MessageReplies")
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -63,6 +63,19 @@ model Message {
 
   @@index([conversationId])
   @@index([senderId])
+}
+
+model MessageMedia {
+  id        String   @id @default(cuid())
+  messageId String
+  src       String
+  type      String  // "image", "video"
+  filename  String
+
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  @@index([messageId])
 }
 
 model Reaction {

@@ -122,6 +122,13 @@ interface ReplyMessage {
   sender: UserPreview;
 }
 
+interface MessageMedia {
+  id: string;
+  src: string;
+  type: string; // "image", "video"
+  filename: string;
+}
+
 interface Message {
   id: string;
   text: string;
@@ -130,6 +137,7 @@ interface Message {
   createdAt: string;
   reactions: GroupedReactions;
   replyTo?: ReplyMessage | null;
+  media?: MessageMedia[];
 }
 
 export type {
@@ -141,6 +149,7 @@ export type {
   ConversationTypes,
   FolderDto,
   Message,
+  MessageMedia,
   GroupedReactions,
   UserPreview,
   Reaction,

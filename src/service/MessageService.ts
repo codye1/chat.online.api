@@ -1,6 +1,6 @@
 import { Prisma } from "../../generated/prisma/client";
 import { prisma } from "../lib/prisma";
-import { GroupedReactions, Message } from "../types/types";
+import { GroupedReactions, Message, MessageMedia } from "../types/types";
 
 class MessageService {
   static async createMessage({
@@ -8,11 +8,13 @@ class MessageService {
     senderId,
     text,
     replyToMessageId,
+    media,
   }: {
     conversationId: string;
     senderId: string;
     text: string;
     replyToMessageId?: string;
+    media?: Omit<MessageMedia, "messageId">[];
   }) {
     const message = await prisma.message.create({
       data: { conversationId, senderId, text, replyToMessageId },
@@ -44,6 +46,16 @@ class MessageService {
       },
     });
 
+    let createdMedia: MessageMedia[] = [];
+    if (media && media.length > 0) {
+      createdMedia = await prisma.messageMedia.createManyAndReturn({
+        data: media.map((m) => ({
+          ...m,
+          messageId: message.id,
+        })),
+      });
+    }
+
     return {
       id: message.id,
       text: message.text,
@@ -52,6 +64,7 @@ class MessageService {
       sender: message.sender,
       replyTo: message.replyTo,
       reactions: {} as GroupedReactions,
+      media: createdMedia.length > 0 ? createdMedia : undefined,
     } satisfies Message;
   }
 
@@ -73,11 +86,11 @@ class MessageService {
     if (jumpToLatest) {
       const messages = await fetchMessagesWithReactions(
         Prisma.sql`
-      SELECT * FROM "Message"
-      WHERE "conversationId" = ${conversationId}
-      ORDER BY id DESC       -- take the latest N
-      LIMIT ${take}          -- final ORDER BY ASC will restore order
-    `,
+        SELECT * FROM "Message"
+        WHERE "conversationId" = ${conversationId}
+        ORDER BY id DESC
+        LIMIT ${take}
+      `,
         userId,
       );
 
@@ -97,11 +110,11 @@ class MessageService {
       if (!lastReadId) {
         const messages = await fetchMessagesWithReactions(
           Prisma.sql`
-        SELECT * FROM "Message"
-        WHERE "conversationId" = ${conversationId}
-        ORDER BY id ASC
-        LIMIT ${take}
-      `,
+          SELECT * FROM "Message"
+          WHERE "conversationId" = ${conversationId}
+          ORDER BY id ASC
+          LIMIT ${take}
+        `,
           userId,
         );
 
@@ -116,12 +129,12 @@ class MessageService {
       // 2b. Has lastRead → load new messages after it
       const newerMessages = await fetchMessagesWithReactions(
         Prisma.sql`
-      SELECT * FROM "Message"
-      WHERE "conversationId" = ${conversationId}
-        AND id > ${lastReadId}
-      ORDER BY id ASC
-      LIMIT ${take}
-    `,
+        SELECT * FROM "Message"
+        WHERE "conversationId" = ${conversationId}
+          AND id > ${lastReadId}
+        ORDER BY id ASC
+        LIMIT ${take}
+      `,
         userId,
       );
 
@@ -129,11 +142,11 @@ class MessageService {
       if (newerMessages.length === 0) {
         const messages = await fetchMessagesWithReactions(
           Prisma.sql`
-        SELECT * FROM "Message"
-        WHERE "conversationId" = ${conversationId}
-        ORDER BY id DESC
-        LIMIT ${take}
-      `,
+          SELECT * FROM "Message"
+          WHERE "conversationId" = ${conversationId}
+          ORDER BY id DESC
+          LIMIT ${take}
+        `,
           userId,
         );
 
@@ -151,12 +164,12 @@ class MessageService {
 
         const olderMessages = await fetchMessagesWithReactions(
           Prisma.sql`
-        SELECT * FROM "Message"
-        WHERE "conversationId" = ${conversationId}
-          AND id <= ${lastReadId}
-        ORDER BY id DESC
-        LIMIT ${olderCount}
-      `,
+          SELECT * FROM "Message"
+          WHERE "conversationId" = ${conversationId}
+            AND id <= ${lastReadId}
+          ORDER BY id DESC
+          LIMIT ${olderCount}
+        `,
           userId,
         );
 
@@ -182,35 +195,34 @@ class MessageService {
 
     // ── 3. With cursor ──────────────────────────────────────────────────────
     if (direction === "UP") {
-      // Messages BEFORE cursor (older)
       const messages = await fetchMessagesWithReactions(
         Prisma.sql`
-      SELECT * FROM "Message"
-      WHERE "conversationId" = ${conversationId}
-        AND id < ${cursor}
-      ORDER BY id DESC   -- take closest to cursor
-      LIMIT ${take}      -- final ORDER BY ASC will restore order
-    `,
+        SELECT * FROM "Message"
+        WHERE "conversationId" = ${conversationId}
+          AND id < ${cursor}
+        ORDER BY id DESC
+        LIMIT ${take}
+      `,
         userId,
       );
 
       return { items: messages, hasMoreUp: messages.length === take };
     } else {
-      // Messages AFTER cursor (newer)
       const messages = await fetchMessagesWithReactions(
         Prisma.sql`
-      SELECT * FROM "Message"
-      WHERE "conversationId" = ${conversationId}
-        AND id > ${cursor}
-      ORDER BY id ASC
-      LIMIT ${take}
-    `,
+        SELECT * FROM "Message"
+        WHERE "conversationId" = ${conversationId}
+          AND id > ${cursor}
+        ORDER BY id ASC
+        LIMIT ${take}
+      `,
         userId,
       );
 
       return { items: messages, hasMoreDown: messages.length === take };
     }
   }
+
   static async markMessagesAsRead({
     conversationId,
     userId,
@@ -248,7 +260,6 @@ class MessageService {
       data: { text: newText },
     });
 
-    // fetch edited message with grouped reactions
     const [updated] = await fetchMessagesWithReactions(
       Prisma.sql`SELECT * FROM "Message" WHERE id = ${messageId}`,
       userId,
@@ -265,11 +276,15 @@ const fetchMessagesWithReactions = async (
   userId: string,
 ): Promise<Message[]> => {
   const rows = await prisma.$queryRaw<
-    (Omit<Message, "reactions" | "sender" | "createdAt" | "replyTo"> & {
+    (Omit<
+      Message,
+      "reactions" | "sender" | "createdAt" | "replyTo" | "media"
+    > & {
       createdAt: Date;
       sender: Message["sender"] | string;
       reactions: GroupedReactions | string | null;
       replyTo: Message["replyTo"] | string | null;
+      media: MessageMedia[] | string | null;
     })[]
   >`WITH msg AS (
       ${messagesSql}
@@ -327,6 +342,23 @@ const fetchMessagesWithReactions = async (
         ) AS reactions
       FROM reaction_top_users rtu
       GROUP BY rtu."messageId"
+    ),
+
+    -- ── Media ──────────────────────────────────────────────────────────────
+    media_grouped AS (
+      SELECT
+        mm."messageId",
+        json_agg(
+          json_build_object(
+            'id',       mm."id",
+            'src',      mm."src",
+            'type',     mm."type",
+            'filename', mm."filename"
+          )
+        ) AS media
+      FROM "MessageMedia" mm
+      WHERE mm."messageId" IN (SELECT id FROM msg)
+      GROUP BY mm."messageId"
     )
 
     SELECT
@@ -356,12 +388,14 @@ const fetchMessagesWithReactions = async (
             )
           )
         ELSE NULL
-      END AS "replyTo"
+      END AS "replyTo",
+      mg.media AS media
     FROM msg m
     JOIN "User" u ON u."id" = m."senderId"
     LEFT JOIN reactions_grouped rg ON rg."messageId" = m.id
     LEFT JOIN "Message" rm ON rm."id" = m."replyToMessageId"
     LEFT JOIN "User" ru ON ru."id" = rm."senderId"
+    LEFT JOIN media_grouped mg ON mg."messageId" = m.id
     ORDER BY m.id ASC
   `;
 
@@ -381,5 +415,9 @@ const fetchMessagesWithReactions = async (
       typeof row.replyTo === "string"
         ? JSON.parse(row.replyTo)
         : (row.replyTo ?? null),
+    media:
+      typeof row.media === "string"
+        ? JSON.parse(row.media)
+        : (row.media ?? null),
   }));
 };

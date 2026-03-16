@@ -142,7 +142,8 @@ const initializeSocket = async (io: Server) => {
     });
 
     socket.on("message:send", async (data) => {
-      const { conversationId, recipientId, text, replyToMessageId } = data;
+      const { conversationId, recipientId, text, replyToMessageId, media } =
+        data;
 
       if (!conversationId && recipientId) {
         const conversation = await ConversationService.getConversationByUsersId(
@@ -164,6 +165,7 @@ const initializeSocket = async (io: Server) => {
             senderId: socket.data.userId,
             text,
             replyToMessageId: replyToMessageId,
+            media: media,
           });
           io.to(conversation.id).emit("message:new", message);
           return;
@@ -186,6 +188,7 @@ const initializeSocket = async (io: Server) => {
           senderId: socket.data.userId,
           text,
           replyToMessageId: replyToMessageId,
+          media: media,
         });
 
         // to sender
@@ -230,12 +233,14 @@ const initializeSocket = async (io: Server) => {
           });
           return;
         }
+        console.log(media);
 
         const message = await MessageService.createMessage({
           conversationId,
           senderId: socket.data.userId,
           text,
           replyToMessageId: replyToMessageId,
+          media: media,
         });
 
         io.to(conversationId).emit("message:new", message);
