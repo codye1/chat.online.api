@@ -250,15 +250,33 @@ class MessageService {
     messageId,
     userId,
     newText,
+    replaceMedia,
   }: {
     messageId: string;
     userId: string;
     newText: string;
+    replaceMedia?: {
+      oldMediaId?: string;
+      newMedia: MessageMedia;
+    };
   }) {
-    await prisma.message.update({
+    const updateMessagePromise = prisma.message.update({
       where: { id: messageId, senderId: userId },
       data: { text: newText },
     });
+    let upsertMediaPromise: Promise<unknown> | undefined;
+    if (replaceMedia) {
+      upsertMediaPromise = prisma.messageMedia.upsert({
+        where: { id: replaceMedia.oldMediaId ?? "", messageId },
+        create: { ...replaceMedia.newMedia, messageId },
+        update: { ...replaceMedia.newMedia },
+      });
+    }
+    if (upsertMediaPromise) {
+      await Promise.all([updateMessagePromise, upsertMediaPromise]);
+    } else {
+      await updateMessagePromise;
+    }
 
     const [updated] = await fetchMessagesWithReactions(
       Prisma.sql`SELECT * FROM "Message" WHERE id = ${messageId}`,

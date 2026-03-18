@@ -430,7 +430,7 @@ const initializeSocket = async (io: Server) => {
     });
 
     socket.on("message:edit", async (data) => {
-      const { messageId, conversationId, newText } = data;
+      const { messageId, conversationId, newText, replaceMedia } = data;
       try {
         const message = await MessageService.getMessageById(messageId);
 
@@ -445,6 +445,7 @@ const initializeSocket = async (io: Server) => {
           messageId,
           userId: socket.data.userId,
           newText,
+          replaceMedia,
         });
 
         io.to(conversationId).emit("message:edited", {
