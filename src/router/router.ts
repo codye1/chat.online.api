@@ -85,7 +85,7 @@ router.delete(
 );
 
 router.patch(
-  "/chat/conversations/pin",
+  "/chat/pinned-positions",
   authMiddleware,
   ChatController.updatePinnedPositions,
 );

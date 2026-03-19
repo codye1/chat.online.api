@@ -84,7 +84,7 @@ class MessageService {
   ) {
     // ── 1. Jump to latest ────────────────────────────────────────────────────
     if (jumpToLatest) {
-      const messages = await fetchMessagesWithReactions(
+      const messages = await this.fetchMessagesWithReactions(
         Prisma.sql`
         SELECT * FROM "Message"
         WHERE "conversationId" = ${conversationId}
@@ -108,7 +108,7 @@ class MessageService {
 
       // 2a. No lastRead → first page
       if (!lastReadId) {
-        const messages = await fetchMessagesWithReactions(
+        const messages = await this.fetchMessagesWithReactions(
           Prisma.sql`
           SELECT * FROM "Message"
           WHERE "conversationId" = ${conversationId}
@@ -127,7 +127,7 @@ class MessageService {
       }
 
       // 2b. Has lastRead → load new messages after it
-      const newerMessages = await fetchMessagesWithReactions(
+      const newerMessages = await this.fetchMessagesWithReactions(
         Prisma.sql`
         SELECT * FROM "Message"
         WHERE "conversationId" = ${conversationId}
@@ -140,7 +140,7 @@ class MessageService {
 
       // 2c. No new messages → show last N messages
       if (newerMessages.length === 0) {
-        const messages = await fetchMessagesWithReactions(
+        const messages = await this.fetchMessagesWithReactions(
           Prisma.sql`
           SELECT * FROM "Message"
           WHERE "conversationId" = ${conversationId}
@@ -162,7 +162,7 @@ class MessageService {
       if (newerMessages.length < take) {
         const olderCount = take - newerMessages.length;
 
-        const olderMessages = await fetchMessagesWithReactions(
+        const olderMessages = await this.fetchMessagesWithReactions(
           Prisma.sql`
           SELECT * FROM "Message"
           WHERE "conversationId" = ${conversationId}
@@ -195,7 +195,7 @@ class MessageService {
 
     // ── 3. With cursor ──────────────────────────────────────────────────────
     if (direction === "UP") {
-      const messages = await fetchMessagesWithReactions(
+      const messages = await this.fetchMessagesWithReactions(
         Prisma.sql`
         SELECT * FROM "Message"
         WHERE "conversationId" = ${conversationId}
@@ -208,7 +208,7 @@ class MessageService {
 
       return { items: messages, hasMoreUp: messages.length === take };
     } else {
-      const messages = await fetchMessagesWithReactions(
+      const messages = await this.fetchMessagesWithReactions(
         Prisma.sql`
         SELECT * FROM "Message"
         WHERE "conversationId" = ${conversationId}
@@ -278,33 +278,30 @@ class MessageService {
       await updateMessagePromise;
     }
 
-    const [updated] = await fetchMessagesWithReactions(
+    const [updated] = await this.fetchMessagesWithReactions(
       Prisma.sql`SELECT * FROM "Message" WHERE id = ${messageId}`,
       userId,
     );
 
     return updated;
   }
-}
 
-export default MessageService;
-
-const fetchMessagesWithReactions = async (
-  messagesSql: Prisma.Sql,
-  userId: string,
-): Promise<Message[]> => {
-  const rows = await prisma.$queryRaw<
-    (Omit<
-      Message,
-      "reactions" | "sender" | "createdAt" | "replyTo" | "media"
-    > & {
-      createdAt: Date;
-      sender: Message["sender"] | string;
-      reactions: GroupedReactions | string | null;
-      replyTo: Message["replyTo"] | string | null;
-      media: MessageMedia[] | string | null;
-    })[]
-  >`WITH msg AS (
+  static async fetchMessagesWithReactions(
+    messagesSql: Prisma.Sql,
+    userId: string,
+  ): Promise<Message[]> {
+    const rows = await prisma.$queryRaw<
+      (Omit<
+        Message,
+        "reactions" | "sender" | "createdAt" | "replyTo" | "media"
+      > & {
+        createdAt: Date;
+        sender: Message["sender"] | string;
+        reactions: GroupedReactions | string | null;
+        replyTo: Message["replyTo"] | string | null;
+        media: MessageMedia[] | string | null;
+      })[]
+    >`WITH msg AS (
       ${messagesSql}
     ),
 
@@ -417,25 +414,28 @@ const fetchMessagesWithReactions = async (
     ORDER BY m.id ASC
   `;
 
-  return rows.map((row) => ({
-    ...row,
-    createdAt:
-      row.createdAt instanceof Date
-        ? row.createdAt.toISOString()
-        : (row.createdAt as string),
-    sender:
-      typeof row.sender === "string" ? JSON.parse(row.sender) : row.sender,
-    reactions:
-      typeof row.reactions === "string"
-        ? JSON.parse(row.reactions)
-        : (row.reactions ?? {}),
-    replyTo:
-      typeof row.replyTo === "string"
-        ? JSON.parse(row.replyTo)
-        : (row.replyTo ?? null),
-    media:
-      typeof row.media === "string"
-        ? JSON.parse(row.media)
-        : (row.media ?? null),
-  }));
-};
+    return rows.map((row) => ({
+      ...row,
+      createdAt:
+        row.createdAt instanceof Date
+          ? row.createdAt.toISOString()
+          : (row.createdAt as string),
+      sender:
+        typeof row.sender === "string" ? JSON.parse(row.sender) : row.sender,
+      reactions:
+        typeof row.reactions === "string"
+          ? JSON.parse(row.reactions)
+          : (row.reactions ?? {}),
+      replyTo:
+        typeof row.replyTo === "string"
+          ? JSON.parse(row.replyTo)
+          : (row.replyTo ?? null),
+      media:
+        typeof row.media === "string"
+          ? JSON.parse(row.media)
+          : (row.media ?? null),
+    }));
+  }
+}
+
+export default MessageService;

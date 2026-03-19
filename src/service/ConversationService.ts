@@ -1,3 +1,23 @@
+const participantInclude = {
+  where: {
+    OR: [{ userId: undefined }, { userId: { not: undefined } }],
+  },
+  take: 2,
+  include: {
+    user: {
+      select: {
+        id: true,
+        email: true,
+        nickname: true,
+        avatarUrl: true,
+        lastName: true,
+        firstName: true,
+        biography: true,
+        lastSeenAt: true,
+      },
+    },
+  },
+};
 import { prisma } from "../lib/prisma";
 import { Prisma } from "../../generated/prisma/client";
 import ApiError from "../utils/ApiError";
@@ -198,7 +218,7 @@ class ConversationService {
     userId: string,
     take = 20,
   ): Promise<ConversationsInit> {
-    // 1. Загружаем ВСЕ participant-записи (для полных activeIds/archivedIds)
+    // 1. Загружаем ВСЕ participant-записи юзера (для полных activeIds/archivedIds)
     const allParticipants = await prisma.conversationParticipant.findMany({
       where: { userId },
       select: {
@@ -496,24 +516,9 @@ class ConversationService {
       },
       include: {
         participants: {
-          // we need 1 user who userId===userId and 1 random user but not userId===userId
+          ...participantInclude,
           where: {
             OR: [{ userId: userId }, { userId: { not: userId } }],
-          },
-          take: 2,
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                nickname: true,
-                avatarUrl: true,
-                lastName: true,
-                firstName: true,
-                biography: true,
-                lastSeenAt: true,
-              },
-            },
           },
         },
         messages: {
@@ -547,24 +552,9 @@ class ConversationService {
           take: 1,
         },
         participants: {
-          // we need 1 user who userId===userId and 1 random user but not userId===userId
+          ...participantInclude,
           where: {
             OR: [{ userId: userId }, { userId: { not: userId } }],
-          },
-          take: 2,
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                nickname: true,
-                avatarUrl: true,
-                lastName: true,
-                firstName: true,
-                biography: true,
-                lastSeenAt: true,
-              },
-            },
           },
         },
       },
@@ -603,24 +593,9 @@ class ConversationService {
           take: 1,
         },
         participants: {
-          // we need 1 user who userId===userId and 1 random user but not userId===userId
+          ...participantInclude,
           where: {
             OR: [{ userId: userId }, { userId: { not: userId } }],
-          },
-          take: 2,
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                nickname: true,
-                avatarUrl: true,
-                lastName: true,
-                firstName: true,
-                biography: true,
-                lastSeenAt: true,
-              },
-            },
           },
         },
       },
@@ -646,7 +621,7 @@ class ConversationService {
       updated.archivedPinnedPosition !== null &&
       dataToUpdate.isArchived === false
     ) {
-      FolderService.updatePinnedPositions(
+      await FolderService.updatePinnedPositions(
         userId,
         [{ conversationId, newPinnedPosition: null }],
         "ARCHIVED",

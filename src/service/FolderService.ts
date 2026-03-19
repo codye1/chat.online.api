@@ -73,7 +73,7 @@ class FolderService {
     userId: string,
     folderId: string,
   ): Promise<boolean> {
-    const folder = await prisma.folder.findUnique({
+    const folder = await prisma.folder.findFirst({
       where: {
         id: folderId,
         userId,
@@ -114,37 +114,67 @@ class FolderService {
     folderId: string,
   ) {
     if (updates.length === 0) return;
-    if (folderId === "ACTIVE" || folderId === "ARCHIVED") {
-      {
-        const conversationIds = updates.map((u) => u.conversationId);
-        const positions = updates.map((u) => u.newPinnedPosition);
+    if (folderId === "ACTIVE") {
+      const conversationIds = updates.map((u) => u.conversationId);
+      const positions = updates.map((u) => u.newPinnedPosition);
 
-        await prisma.$executeRaw`
-      UPDATE "ConversationParticipant" cp
-      SET "pinnedPosition" = data.position
-      FROM (
-        SELECT
-          UNNEST(${conversationIds}::text[]) AS conversation_id,
-          UNNEST(${positions}::int[])        AS position
-      ) AS data
-      WHERE cp."conversationId" = data.conversation_id
-        AND cp."userId" = ${userId}
-    `;
+      await prisma.$executeRaw`
+        UPDATE "ConversationParticipant" cp
+        SET "pinnedPosition" = data.position
+        FROM (
+          SELECT
+            UNNEST(${conversationIds}::text[]) AS conversation_id,
+            UNNEST(${positions}::int[])        AS position
+        ) AS data
+        WHERE cp."conversationId" = data.conversation_id
+          AND cp."userId" = ${userId}
+      `;
 
-        await prisma.$executeRaw`
-      WITH ranked AS (
-        SELECT "conversationId",
-               (ROW_NUMBER() OVER (ORDER BY "pinnedPosition"))::int - 1 AS new_position
-        FROM "ConversationParticipant"
-        WHERE "userId" = ${userId} AND "pinnedPosition" IS NOT NULL
-      )
-      UPDATE "ConversationParticipant" cp
-      SET "pinnedPosition" = ranked.new_position
-      FROM ranked
-      WHERE cp."conversationId" = ranked."conversationId"
-        AND cp."userId" = ${userId}
-    `;
-      }
+      await prisma.$executeRaw`
+        WITH ranked AS (
+          SELECT "conversationId",
+                 (ROW_NUMBER() OVER (ORDER BY "pinnedPosition"))::int - 1 AS new_position
+          FROM "ConversationParticipant"
+          WHERE "userId" = ${userId} AND "pinnedPosition" IS NOT NULL
+        )
+        UPDATE "ConversationParticipant" cp
+        SET "pinnedPosition" = ranked.new_position
+        FROM ranked
+        WHERE cp."conversationId" = ranked."conversationId"
+          AND cp."userId" = ${userId}
+      `;
+      return;
+    }
+    if (folderId === "ARCHIVED") {
+      const conversationIds = updates.map((u) => u.conversationId);
+      const positions = updates.map((u) => u.newPinnedPosition);
+
+      await prisma.$executeRaw`
+        UPDATE "ConversationParticipant" cp
+        SET "archivedPinnedPosition" = data.position
+        FROM (
+          SELECT
+            UNNEST(${conversationIds}::text[]) AS conversation_id,
+            UNNEST(${positions}::int[])        AS position
+        ) AS data
+        WHERE cp."conversationId" = data.conversation_id
+          AND cp."userId" = ${userId}
+      `;
+
+      await prisma.$executeRaw`
+        WITH ranked AS (
+          SELECT "conversationId",
+                 (ROW_NUMBER() OVER (ORDER BY "archivedPinnedPosition"))::int - 1 AS new_position
+          FROM "ConversationParticipant"
+          WHERE "userId" = ${userId} AND "archivedPinnedPosition" IS NOT NULL
+        )
+        UPDATE "ConversationParticipant" cp
+        SET "archivedPinnedPosition" = ranked.new_position
+        FROM ranked
+        WHERE cp."conversationId" = ranked."conversationId"
+          AND cp."userId" = ${userId}
+      `;
+      return;
     }
 
     const conversationIds = updates.map((u) => u.conversationId);

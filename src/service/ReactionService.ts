@@ -3,25 +3,35 @@ import { prisma } from "../lib/prisma";
 import { ReactorListItem } from "../types/types";
 
 class ReactionService {
-  static async addReaction(messageId: string, userId: string, content: string) {
-    return await prisma.reaction.create({
-      include: {
-        user: {
-          select: {
-            id: true,
-            nickname: true,
-            avatarUrl: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
+  static async upsertReaction(
+    messageId: string,
+    userId: string,
+    content: string,
+  ) {
+    const userSelect = {
+      select: {
+        id: true,
+        nickname: true,
+        avatarUrl: true,
+        firstName: true,
+        lastName: true,
       },
-      data: {
-        messageId,
-        userId,
-        content,
-      },
-    });
+    };
+
+    const [prevReaction, newReaction] = await Promise.all([
+      prisma.reaction.findUnique({
+        where: { messageId_userId: { messageId, userId } },
+        include: { user: userSelect },
+      }),
+      prisma.reaction.upsert({
+        where: { messageId_userId: { messageId, userId } },
+        create: { messageId, userId, content },
+        update: { content },
+        include: { user: userSelect },
+      }),
+    ]);
+
+    return { newReaction, prevReaction };
   }
 
   static async removeReaction({

@@ -320,31 +320,18 @@ const initializeSocket = async (io: Server) => {
           });
           return;
         }
-
-        const existingReaction =
-          await ReactionService.getReactionByUserAndMessage(
+        const { newReaction, prevReaction } =
+          await ReactionService.upsertReaction(
             messageId,
             socket.data.userId,
+            content,
           );
-
-        if (existingReaction) {
-          await ReactionService.removeReaction({
-            userId: socket.data.userId,
-            messageId,
-          });
-        }
-
-        const newReaction = await ReactionService.addReaction(
-          messageId,
-          socket.data.userId,
-          content,
-        );
 
         io.to(message.conversationId).emit("reaction:new", {
           conversationId: message.conversationId,
           messageId,
           newReaction,
-          prevReaction: existingReaction,
+          prevReaction,
         });
 
         console.log(
