@@ -1,16 +1,17 @@
 import { Server } from "socket.io";
 import MessageService from "./service/MessageService";
 import ConversationService from "./service/ConversationService";
-import TokenService from "./service/TokenService";
 import { log } from "node:console";
+import ReactionService from "./service/ReactionService";
+import UserService from "./service/UserService";
 const initializeSocket = async (io: Server) => {
   io.on("connect", (socket) => {
     console.log(`User connected: ${socket.data.userId}`);
-    TokenService.updateLastSeenAt(socket.data.userId);
+    UserService.updateLastSeenAt(socket.data.userId);
     socket.join(socket.data.userId);
 
     socket.on("lastSeenAt:update", () => {
-      TokenService.updateLastSeenAt(socket.data.userId);
+      UserService.updateLastSeenAt(socket.data.userId);
       io.to(`lastSeenAt:${socket.data.userId}`).emit("lastSeenAt:update", {
         userId: socket.data.userId,
         lastSeenAt: new Date(),
@@ -29,8 +30,12 @@ const initializeSocket = async (io: Server) => {
     });
 
     socket.on(
-      "typing:start",
-      async (data: { conversationId: string; nickname: string }) => {
+      "activity:start",
+      async (data: {
+        conversationId: string;
+        nickname: string;
+        reason: string;
+      }) => {
         const isParticipant = await ConversationService.isParticipant(
           data.conversationId,
           socket.data.userId,
@@ -44,14 +49,14 @@ const initializeSocket = async (io: Server) => {
         }
 
         log(
-          `User ${socket.data.userId} ${socket.id} started typing in conversation ${data.conversationId}`,
+          `User ${socket.data.userId} ${socket.id} started activity in conversation ${data.conversationId}`,
         );
-        socket.to(data.conversationId).emit("typing:start", data);
+        socket.to(data.conversationId).emit("activity:start", data);
       },
     );
 
     socket.on(
-      "typing:stop",
+      "activity:stop",
       async (data: { conversationId: string; nickname: string }) => {
         const isParticipant = await ConversationService.isParticipant(
           data.conversationId,
@@ -65,7 +70,7 @@ const initializeSocket = async (io: Server) => {
           return;
         }
 
-        socket.to(data.conversationId).emit("typing:stop", data);
+        socket.to(data.conversationId).emit("activity:stop", data);
       },
     );
 
@@ -137,7 +142,8 @@ const initializeSocket = async (io: Server) => {
     });
 
     socket.on("message:send", async (data) => {
-      const { conversationId, recipientId, text } = data;
+      const { conversationId, recipientId, text, replyToMessageId, media } =
+        data;
 
       if (!conversationId && recipientId) {
         const conversation = await ConversationService.getConversationByUsersId(
@@ -147,8 +153,10 @@ const initializeSocket = async (io: Server) => {
 
         if (conversation) {
           socket.join(conversation.id);
-          io.to(conversation.id).emit("conversation:update", conversation);
-
+          io.to(conversation.id).emit("conversation:update", {
+            conversation,
+            recipientId,
+          });
           console.log(
             `User ${socket.data.userId} ${socket.id} sent message to existing conversation ${conversation.id}`,
           );
@@ -156,6 +164,8 @@ const initializeSocket = async (io: Server) => {
             conversationId: conversation.id,
             senderId: socket.data.userId,
             text,
+            replyToMessageId: replyToMessageId,
+            media: media,
           });
           io.to(conversation.id).emit("message:new", message);
           return;
@@ -167,29 +177,42 @@ const initializeSocket = async (io: Server) => {
             title: null,
             userId: socket.data.userId,
           });
-
         if (!createdConversation) {
           socket.emit("conversation:error", {
             message: "Failed to create conversation",
           });
           return;
         }
-
-        socket.to(recipientId).emit("conversation:new", {
-          ...createdConversation,
-          unreadMessages: 0,
-        });
-        socket.join(createdConversation.id);
-        io.to(createdConversation.id).emit(
-          "conversation:update",
-          createdConversation,
-        );
         const message = await MessageService.createMessage({
           conversationId: createdConversation.id,
           senderId: socket.data.userId,
           text,
+          replyToMessageId: replyToMessageId,
+          media: media,
         });
-        io.to(createdConversation.id).emit("message:new", message);
+
+        // to sender
+        socket.emit("conversation:new", {
+          conversation: {
+            ...createdConversation,
+            lastMessage: { text: message.text, createdAt: message.createdAt },
+            unreadMessages: 0,
+          },
+          recipientId,
+          firstMessage: message,
+        });
+
+        // to recipient
+        socket.to(recipientId).emit("conversation:new", {
+          conversation: {
+            ...createdConversation,
+            lastMessage: { text: message.text, createdAt: message.createdAt },
+            unreadMessages: 1,
+          },
+          recipientId,
+          initiator: socket.data.userId,
+          firstMessage: message,
+        });
 
         console.log(
           `User ${socket.data.userId} ${socket.id} sent message to conversation ${createdConversation.id}`,
@@ -210,11 +233,14 @@ const initializeSocket = async (io: Server) => {
           });
           return;
         }
+        console.log(media);
 
         const message = await MessageService.createMessage({
           conversationId,
           senderId: socket.data.userId,
           text,
+          replyToMessageId: replyToMessageId,
+          media: media,
         });
 
         io.to(conversationId).emit("message:new", message);
@@ -251,7 +277,7 @@ const initializeSocket = async (io: Server) => {
           return;
         }
 
-        io.to(conversationId).emit("message:read", {
+        socket.to(conversationId).emit("message:read", {
           conversationId,
           lastReadMessage: {
             id: message.id,
@@ -272,6 +298,154 @@ const initializeSocket = async (io: Server) => {
         console.error("Error in message:read handler:", error);
         socket.emit("error", {
           message: "Failed to mark messages as read",
+        });
+      }
+    });
+
+    socket.on("reaction:add", async (data) => {
+      const { messageId, content } = data;
+
+      try {
+        const message = await MessageService.getMessageById(messageId);
+
+        // Validate user is a participant in the conversation
+        const isParticipant = await ConversationService.isParticipant(
+          message.conversationId,
+          socket.data.userId,
+        );
+
+        if (!isParticipant) {
+          socket.emit("error", {
+            message: "User is not a participant in this conversation",
+          });
+          return;
+        }
+        const { newReaction, prevReaction } =
+          await ReactionService.upsertReaction(
+            messageId,
+            socket.data.userId,
+            content,
+          );
+
+        io.to(message.conversationId).emit("reaction:new", {
+          conversationId: message.conversationId,
+          messageId,
+          newReaction,
+          prevReaction,
+        });
+
+        console.log(
+          `User ${socket.data.userId} ${socket.id} added reaction to message ${messageId}`,
+        );
+      } catch (error) {
+        console.error("Error in reaction:add handler:", error);
+        socket.emit("error", {
+          message: "Failed to add reaction",
+        });
+      }
+    });
+
+    socket.on("reaction:remove", async (data) => {
+      const { messageId } = data;
+
+      try {
+        const message = await MessageService.getMessageById(messageId);
+
+        // Validate user is a participant in the conversation
+        const isParticipant = await ConversationService.isParticipant(
+          message.conversationId,
+          socket.data.userId,
+        );
+
+        if (!isParticipant) {
+          socket.emit("error", {
+            message: "User is not a participant in this conversation",
+          });
+          return;
+        }
+
+        const removedReaction = await ReactionService.removeReaction({
+          userId: socket.data.userId,
+          messageId,
+        });
+
+        io.to(message.conversationId).emit("reaction:removed", {
+          conversationId: message.conversationId,
+          messageId,
+          removedReaction,
+        });
+
+        console.log(
+          `User ${socket.data.userId} ${socket.id} removed reaction ${removedReaction?.content} from message ${messageId}`,
+        );
+      } catch (error) {
+        console.error("Error in reaction:remove handler:", error);
+        socket.emit("error", {
+          message: "Failed to remove reaction",
+        });
+      }
+    });
+
+    socket.on("message:delete", async (data) => {
+      const { messageId } = data;
+      try {
+        const message = await MessageService.getMessageById(messageId);
+
+        if (message.senderId !== socket.data.userId) {
+          socket.emit("error", {
+            message: "User is not the sender of this message",
+          });
+          return;
+        }
+
+        await MessageService.deleteMessage(messageId);
+
+        io.to(message.conversationId).emit("message:deleted", {
+          conversationId: message.conversationId,
+          messageId,
+        });
+
+        console.log(
+          `User ${socket.data.userId} ${socket.id} deleted message ${messageId}`,
+        );
+      } catch (error) {
+        console.error("Error in message:delete handler:", error);
+        socket.emit("error", {
+          message: "Failed to delete message",
+        });
+      }
+    });
+
+    socket.on("message:edit", async (data) => {
+      const { messageId, conversationId, newText, replaceMedia } = data;
+      try {
+        const message = await MessageService.getMessageById(messageId);
+
+        if (message.senderId !== socket.data.userId) {
+          socket.emit("error", {
+            message: "User is not the sender of this message",
+          });
+          return;
+        }
+
+        const editedMessage = await MessageService.editMessage({
+          messageId,
+          userId: socket.data.userId,
+          newText,
+          replaceMedia,
+        });
+
+        io.to(conversationId).emit("message:edited", {
+          editedMessage,
+        });
+
+        console.log(
+          `User ${socket.data.userId} ${socket.id} edited message ${messageId}`,
+        );
+      } catch (error) {
+        console.error("Error in message:edit handler:", error);
+        socket.emit("error", {
+          message: "Failed to edit message",
         });
       }
     });

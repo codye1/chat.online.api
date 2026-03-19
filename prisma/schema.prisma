@@ -23,11 +23,15 @@ model User {
   biography     String  ?
   avatarUrl   String  ?
 
+  lastSeenAt   DateTime @default(now())
+
   provider      String   @default("LOCAL")
 
   createdAt     DateTime @default(now())
-  refreshTokens RefreshToken[]
 
+  folders         Folder[]
+  refreshTokens RefreshToken[]
+  reactions     Reaction[]
   sentMessages     Message[]
   conversations    ConversationParticipant[]
 }
@@ -38,7 +42,6 @@ model RefreshToken {
   userId       String
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt    DateTime @default(now())
-  lastSeenAt   DateTime @default(now())
   @@index([userId])
 }
 
@@ -48,11 +51,46 @@ model Message {
   senderId       String
   text        String
   createdAt      DateTime     @default(now())
+  replyToMessageId String?
+
+  media          MessageMedia[]
+  replyTo Message?             @relation("MessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies Message[]            @relation("MessageReplies")
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
 
+  reactions      Reaction[]
+
   @@index([conversationId])
   @@index([senderId])
+}
+
+model MessageMedia {
+  id        String   @id @default(cuid())
+  messageId String
+  src       String
+  type      String  // "image", "video"
+  filename  String
+
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  @@index([messageId])
+}
+
+model Reaction {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  content  String
+
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@index([userId])
 }
 
 enum ConversationType {
@@ -67,14 +105,22 @@ model Conversation {
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
   participants ConversationParticipant[]
+  lastMessageId String?
+  avatarUrl   String?
+
+
   messages     Message[]
+  folderConversations FolderConversation[]
 }
 
 model ConversationParticipant {
   id             String       @id @default(cuid())
   userId         String
   conversationId String
-
+  pinnedPosition Int?
+  archivedPinnedPosition Int?
+  isArchived       Boolean      @default(false)
+  isMuted          Boolean      @default(false)
   lastReadMessageId String?
 
 
@@ -84,5 +130,33 @@ model ConversationParticipant {
 
 
   @@unique([userId, conversationId])
+  @@index([conversationId])
+}
+
+model Folder {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  icon      String?
+  position  Int
+  createdAt DateTime @default(now())
+
+  user              User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folderConversations FolderConversation[]
+
+  @@index([userId])
+  @@unique([userId, position])
+}
+
+model FolderConversation {
+  id             String   @id @default(cuid())
+  folderId       String
+  conversationId String
+  folder         Folder       @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  pinnedPosition Int?
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([folderId, conversationId])
+  @@index([folderId])
   @@index([conversationId])
 }

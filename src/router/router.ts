@@ -32,6 +32,11 @@ router.get(
 );
 
 router.get(
+  "/chat/conversations/init",
+  authMiddleware,
+  ChatController.initConversations,
+);
+router.get(
   "/chat/conversations",
   authMiddleware,
   ChatController.getConversations,
@@ -40,6 +45,12 @@ router.post(
   "/chat/conversations",
   authMiddleware,
   ChatController.createConversation,
+);
+
+router.patch(
+  "/chat/conversations/:id/settings",
+  authMiddleware,
+  ChatController.updateConversationSettings,
 );
 
 router.post(
@@ -51,6 +62,32 @@ router.get(
   "/chat/conversations/:id/messages",
   authMiddleware,
   ChatController.getMessages,
+);
+
+router.get(
+  "/chat/conversations/:conversationId/messages/:messageId/reactors",
+  authMiddleware,
+  ChatController.getMessageReactions,
+);
+
+router.post("/chat/folders", authMiddleware, ChatController.createFolder);
+
+router.post(
+  "/chat/folders/:folderId/conversations/:conversationId",
+  authMiddleware,
+  ChatController.addToFolder,
+);
+
+router.delete(
+  "/chat/folders/:folderId/conversations/:conversationId",
+  authMiddleware,
+  ChatController.removeFromFolder,
+);
+
+router.patch(
+  "/chat/pinned-positions",
+  authMiddleware,
+  ChatController.updatePinnedPositions,
 );
 
 router.get("/chat/search", authMiddleware, ChatController.search);

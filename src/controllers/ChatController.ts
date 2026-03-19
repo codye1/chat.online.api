@@ -3,6 +3,9 @@ import MessageService from "../service/MessageService";
 import ConversationService from "../service/ConversationService";
 import UserService from "../service/UserService";
 import ApiError from "../utils/ApiError";
+import ReactionService from "../service/ReactionService";
+import FolderService from "../service/FolderService";
+import { EditableConversationSettings } from "../types/types";
 
 class ChatController {
   static getConversation = async (req: Request, res: Response) => {
@@ -42,15 +45,16 @@ class ChatController {
         }
 
         return res.json({
-          id: null,
+          id: "tempId:" + recipientId,
           title: recipient.nickname,
           type: "DIRECT",
           otherParticipant: {
             id: recipient.id,
             nickname: recipient.nickname,
             avatarUrl: recipient.avatarUrl,
-            lastSeenAt: recipient.refreshTokens[0]?.lastSeenAt || null,
+            lastSeenAt: recipient.lastSeenAt,
           },
+          activeUsers: [],
         });
       }
 
@@ -60,10 +64,18 @@ class ChatController {
 
   static async getConversations(req: Request, res: Response) {
     const userId = req.userId;
-
-    const conversations =
-      await ConversationService.getConversationsByUserId(userId);
+    const { ids } = req.query as { ids: string };
+    const conversations = await ConversationService.getConversationsByIds(
+      userId,
+      ids.split(","),
+    );
     return res.json(conversations);
+  }
+
+  static async initConversations(req: Request, res: Response) {
+    const userId = req.userId;
+    const result = await ConversationService.initConversations(userId);
+    return res.json(result);
   }
 
   static async createConversation(req: Request, res: Response) {
@@ -141,9 +153,9 @@ class ChatController {
 
     const messages = await MessageService.getMessagesByConversationId(
       id,
+      userId,
       cursor,
       direction,
-      userId,
       take,
       parsedJumpToLatest,
     );
@@ -180,6 +192,182 @@ class ChatController {
       global: users,
     };
     return res.json(results);
+  }
+
+  static async getMessageReactions(
+    req: Request<{
+      messageId: string;
+      reactionContent: string;
+      cursor?: string;
+    }>,
+    res: Response,
+  ) {
+    const { messageId } = req.params;
+    const { reactionContent, cursor, take } = req.query as {
+      reactionContent?: string;
+      cursor?: string;
+      take?: number;
+    };
+
+    console.log({
+      messageId,
+      reactionContent,
+      cursor,
+    });
+
+    const reactions = await ReactionService.getReactorsByMessage({
+      messageId,
+      reactionContent,
+      cursor,
+      take: Number(take) || 20,
+    });
+    return res.json(reactions);
+  }
+
+  static async createFolder(req: Request, res: Response) {
+    const userId = req.userId;
+    const { title, position, icon, conversations } = req.body;
+
+    if (!title || title.trim() === "") {
+      throw new ApiError(400, "INVALID_INPUT", "Title is required");
+    }
+
+    if (typeof position !== "number") {
+      throw new ApiError(400, "INVALID_INPUT", "Position must be a number");
+    }
+
+    const folder = await FolderService.createFolder({
+      userId,
+      title,
+      position,
+      icon,
+      conversations,
+    });
+    return res.json(folder);
+  }
+
+  static async updatePinnedPositions(
+    req: Request<{ id: string }>,
+    res: Response,
+  ) {
+    const userId = req.userId;
+    const { updates, folderId } = req.body as {
+      updates: Array<{
+        conversationId: string;
+        newPinnedPosition: number | null;
+      }>;
+      folderId: string;
+    };
+
+    if (!updates || !Array.isArray(updates)) {
+      throw new ApiError(400, "INVALID_INPUT", "Updates must be an array");
+    }
+
+    await FolderService.updatePinnedPositions(userId, updates, folderId);
+
+    return res.json({ success: true });
+  }
+
+  static async updateConversationSettings(
+    req: Request<{ id: string }>,
+    res: Response,
+  ) {
+    const userId = req.userId;
+    const { id: conversationId } = req.params;
+    const { isMuted, isArchived } = req.body as EditableConversationSettings;
+
+    if (typeof isMuted === "undefined" && typeof isArchived === "undefined") {
+      throw new ApiError(
+        400,
+        "INVALID_INPUT",
+        "At least one of isMuted or isArchived must be provided",
+      );
+    }
+
+    const isParticipant = await ConversationService.isParticipant(
+      conversationId,
+      userId,
+    );
+    if (!isParticipant) {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "You are not a participant of this conversation",
+      );
+    }
+
+    await ConversationService.updateConversationSettings(
+      conversationId,
+      userId,
+      {
+        isMuted,
+        isArchived,
+      },
+    );
+
+    return res.json({ success: true });
+  }
+
+  static async addToFolder(req: Request, res: Response) {
+    const userId = req.userId;
+    const { folderId, conversationId } = req.params as {
+      folderId: string;
+      conversationId: string;
+    };
+
+    const isParticipant = await ConversationService.isParticipant(
+      conversationId,
+      userId,
+    );
+    if (!isParticipant) {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "You are not a participant of this conversation",
+      );
+    }
+    const isOwned = await FolderService.isOwnedByUser(userId, folderId);
+    if (!isOwned) {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "You are not the owner of this folder",
+      );
+    }
+    await FolderService.addConversationToFolder(folderId, conversationId);
+
+    return res.json({ success: true });
+  }
+
+  static async removeFromFolder(req: Request, res: Response) {
+    const userId = req.userId;
+    const { folderId, conversationId } = req.params as {
+      folderId: string;
+      conversationId: string;
+    };
+
+    const isParticipant = await ConversationService.isParticipant(
+      conversationId,
+      userId,
+    );
+    if (!isParticipant) {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "You are not a participant of this conversation",
+      );
+    }
+    const isOwned = await FolderService.isOwnedByUser(userId, folderId);
+    if (!isOwned) {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "You are not the owner of this folder",
+      );
+    }
+    await FolderService.removeConversationFromFolder(folderId, conversationId);
+
+    return res.json({ success: true });
   }
 }
 
