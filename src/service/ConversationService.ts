@@ -639,6 +639,12 @@ class ConversationService {
     });
     return !!participant;
   }
+
+  static async deleteConversation(conversationId: string) {
+    await prisma.conversation.delete({
+      where: { id: conversationId },
+    });
+  }
 }
 
 export default ConversationService;

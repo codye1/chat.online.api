@@ -49,3 +49,5 @@ initializeSocket(io);
 server.listen(PORT, () => {
   console.log(`API listening on http://localhost:${PORT}`);
 });
+
+export { io };

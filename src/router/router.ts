@@ -41,6 +41,13 @@ router.get(
   authMiddleware,
   ChatController.getConversations,
 );
+
+router.delete(
+  "/chat/conversations/:id",
+  authMiddleware,
+  ChatController.deleteConversation,
+);
+
 router.post(
   "/chat/conversations",
   authMiddleware,
@@ -76,6 +83,18 @@ router.post(
   "/chat/folders/:folderId/conversations/:conversationId",
   authMiddleware,
   ChatController.addToFolder,
+);
+
+router.patch(
+  "/chat/folders/:folderId",
+  authMiddleware,
+  ChatController.renameFolder,
+);
+
+router.delete(
+  "/chat/folders/:folderId",
+  authMiddleware,
+  ChatController.deleteFolder,
 );
 
 router.delete(

@@ -114,9 +114,6 @@ const initializeSocket = async (io: Server) => {
         // Join all valid conversations
         validConversationIds.forEach((id) => {
           socket.join(id);
-          console.log(
-            `User ${socket.data.userId} ${socket.id} joined conversation ${id}`,
-          );
         });
       },
     );
@@ -142,9 +139,14 @@ const initializeSocket = async (io: Server) => {
     });
 
     socket.on("message:send", async (data) => {
-      const { conversationId, recipientId, text, replyToMessageId, media } =
-        data;
-
+      const {
+        conversationId,
+        recipientId,
+        text,
+        replyToMessageId,
+        media,
+        tempId,
+      } = data;
       if (!conversationId && recipientId) {
         const conversation = await ConversationService.getConversationByUsersId(
           [socket.data.userId, recipientId],
@@ -167,7 +169,9 @@ const initializeSocket = async (io: Server) => {
             replyToMessageId: replyToMessageId,
             media: media,
           });
-          io.to(conversation.id).emit("message:new", message);
+          //io.to(conversation.id).emit("message:new", message);
+          socket.to(conversation.id).emit("message:new", message);
+          socket.emit("message:sent", { message, tempId });
           return;
         }
 
@@ -200,6 +204,7 @@ const initializeSocket = async (io: Server) => {
           },
           recipientId,
           firstMessage: message,
+          firstMessageTempId: tempId,
         });
 
         // to recipient
@@ -243,7 +248,8 @@ const initializeSocket = async (io: Server) => {
           media: media,
         });
 
-        io.to(conversationId).emit("message:new", message);
+        socket.to(conversationId).emit("message:new", message);
+        socket.emit("message:sent", { message, tempId });
         console.log(
           `User ${socket.data.userId} ${socket.id} sent message to conversation ${conversationId}`,
         );
@@ -252,6 +258,7 @@ const initializeSocket = async (io: Server) => {
 
     socket.on("message:read", async (data) => {
       const { conversationId, lastReadMessageId } = data;
+      console.log(lastReadMessageId);
 
       try {
         const message = await MessageService.getMessageById(lastReadMessageId);
@@ -327,7 +334,7 @@ const initializeSocket = async (io: Server) => {
             content,
           );
 
-        io.to(message.conversationId).emit("reaction:new", {
+        socket.to(message.conversationId).emit("reaction:new", {
           conversationId: message.conversationId,
           messageId,
           newReaction,
@@ -369,7 +376,7 @@ const initializeSocket = async (io: Server) => {
           messageId,
         });
 
-        io.to(message.conversationId).emit("reaction:removed", {
+        socket.to(message.conversationId).emit("reaction:removed", {
           conversationId: message.conversationId,
           messageId,
           removedReaction,

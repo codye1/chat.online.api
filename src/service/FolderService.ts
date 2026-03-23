@@ -206,6 +206,19 @@ class FolderService {
         AND fc."folderId" = ${folderId}
     `;
   }
+
+  static async renameFolder(folderId: string, newTitle: string) {
+    await prisma.folder.update({
+      where: { id: folderId },
+      data: { title: newTitle },
+    });
+  }
+
+  static async deleteFolder(folderId: string) {
+    await prisma.folder.delete({
+      where: { id: folderId },
+    });
+  }
 }
 
 export default FolderService;

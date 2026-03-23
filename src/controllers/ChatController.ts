@@ -6,6 +6,7 @@ import ApiError from "../utils/ApiError";
 import ReactionService from "../service/ReactionService";
 import FolderService from "../service/FolderService";
 import { EditableConversationSettings } from "../types/types";
+import { io } from "..";
 
 class ChatController {
   static getConversation = async (req: Request, res: Response) => {
@@ -367,6 +368,69 @@ class ChatController {
     }
     await FolderService.removeConversationFromFolder(folderId, conversationId);
 
+    return res.json({ success: true });
+  }
+
+  static async deleteConversation(req: Request<{ id: string }>, res: Response) {
+    const userId = req.userId;
+    const { id: conversationId } = req.params;
+
+    const isParticipant = await ConversationService.isParticipant(
+      conversationId,
+      userId,
+    );
+    if (!isParticipant) {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "You are not a participant of this conversation",
+      );
+    }
+
+    await ConversationService.deleteConversation(conversationId);
+    io.to(conversationId).emit("conversation:deleted", {
+      conversationId,
+      initiatorId: userId,
+    });
+    return res.json({ success: true });
+  }
+
+  static async renameFolder(req: Request<{ folderId: string }>, res: Response) {
+    const userId = req.userId;
+    const { folderId } = req.params;
+    const { newTitle } = req.body as { newTitle: string };
+
+    if (!newTitle || newTitle.trim() === "") {
+      throw new ApiError(400, "INVALID_INPUT", "New title is required");
+    }
+
+    const isOwned = await FolderService.isOwnedByUser(userId, folderId);
+    if (!isOwned) {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "You are not the owner of this folder",
+      );
+    }
+
+    await FolderService.renameFolder(folderId, newTitle);
+    return res.json({ success: true });
+  }
+
+  static async deleteFolder(req: Request<{ folderId: string }>, res: Response) {
+    const userId = req.userId;
+    const { folderId } = req.params;
+
+    const isOwned = await FolderService.isOwnedByUser(userId, folderId);
+    if (!isOwned) {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "You are not the owner of this folder",
+      );
+    }
+
+    await FolderService.deleteFolder(folderId);
     return res.json({ success: true });
   }
 }
