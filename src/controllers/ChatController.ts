@@ -5,8 +5,15 @@ import UserService from "../service/UserService";
 import ApiError from "../utils/ApiError";
 import ReactionService from "../service/ReactionService";
 import FolderService from "../service/FolderService";
-import { EditableConversationSettings } from "../types/types";
+import { EditableConversationSettings, UserPreview } from "../types/types";
 import { io } from "..";
+
+interface CreateConversationData {
+  participantIds: string[];
+  title: string;
+  avatarUrl: string | null;
+  type: "DIRECT" | "GROUP";
+}
 
 class ChatController {
   static getConversation = async (req: Request, res: Response) => {
@@ -80,14 +87,23 @@ class ChatController {
   }
 
   static async createConversation(req: Request, res: Response) {
-    const { participantIds, title } = req.body;
+    const { participantIds, title, avatarUrl, type } =
+      req.body as CreateConversationData;
     const userId = req.userId;
 
-    if (participantIds.length < 2) {
+    if (participantIds.includes(userId)) {
       throw new ApiError(
         400,
         "INVALID_INPUT",
-        "At least 2 participants are required to create a conversation",
+        "Creator cannot be included in participantIds",
+      );
+    }
+
+    if (participantIds.length < 1) {
+      throw new ApiError(
+        400,
+        "INVALID_INPUT",
+        "At least 1 participant (other than the creator) is required to create a conversation",
       );
     }
 
@@ -98,6 +114,15 @@ class ChatController {
       participantIds,
       title,
       userId,
+      avatarUrl,
+      type,
+    });
+
+    participantIds.forEach((id) => {
+      io.to(id).emit("conversation:new", {
+        conversation,
+        initiatorId: userId,
+      });
     });
 
     return res.json(conversation);
@@ -165,7 +190,7 @@ class ChatController {
   }
 
   static async search(req: Request, res: Response) {
-    const { query } = req.query as { query: string };
+    const { query, type } = req.query as { query: string; type?: string };
 
     if (!query || query.trim() === "") {
       return res.json({ conversations: [], global: [] });
@@ -176,21 +201,26 @@ class ChatController {
       query,
     );
 
-    const users: {
-      type: "user";
-      id: string;
-      nickname: string;
-      avatarUrl: string | null;
-    }[] = (await UserService.getUsersByNicknameQuery(query)).map((user) => ({
-      type: "user",
-      id: user.id,
-      nickname: user.nickname,
-      avatarUrl: user.avatarUrl,
-    }));
+    let global: UserPreview[] = [];
+
+    if (!type || type === "users") {
+      const users = (await UserService.getUsersByNicknameQuery(query)).map(
+        (user) => ({
+          type: "user",
+          id: user.id,
+          nickname: user.nickname,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          avatarUrl: user.avatarUrl,
+          lastSeenAt: user.lastSeenAt,
+        }),
+      );
+      global = global.concat(users);
+    }
 
     const results = {
       conversations,
-      global: users,
+      global,
     };
     return res.json(results);
   }
@@ -375,23 +405,30 @@ class ChatController {
     const userId = req.userId;
     const { id: conversationId } = req.params;
 
-    const isParticipant = await ConversationService.isParticipant(
+    const participant = await ConversationService.getConversationParticipant(
       conversationId,
       userId,
     );
-    if (!isParticipant) {
+    if (!participant) {
       throw new ApiError(
         403,
         "FORBIDDEN",
         "You are not a participant of this conversation",
       );
     }
-
+    if (participant.role !== "OWNER") {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "You are not the owner of this conversation",
+      );
+    }
     await ConversationService.deleteConversation(conversationId);
     io.to(conversationId).emit("conversation:deleted", {
       conversationId,
       initiatorId: userId,
     });
+
     return res.json({ success: true });
   }
 
@@ -431,6 +468,203 @@ class ChatController {
     }
 
     await FolderService.deleteFolder(folderId);
+    return res.json({ success: true });
+  }
+
+  static async removeUserFromConversation(
+    req: Request<{ conversationId: string; participantId: string }>,
+    res: Response,
+  ) {
+    const userId = req.userId;
+    const { conversationId, participantId: targetUserId } = req.params;
+    const participant = await ConversationService.getConversationParticipant(
+      conversationId,
+      userId,
+    );
+    const isTargetParticipant = await ConversationService.isParticipant(
+      conversationId,
+      targetUserId,
+    );
+    if (!isTargetParticipant) {
+      throw new ApiError(
+        404,
+        "USER_NOT_FOUND",
+        "The user to be removed is not a participant of this conversation",
+      );
+    }
+    if (!participant) {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "You are not a participant of this conversation",
+      );
+    }
+    if (participant?.role !== "OWNER") {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "You are not the owner of this conversation",
+      );
+    }
+
+    const { participantsCount } =
+      await ConversationService.deleteConversationParticipant(
+        conversationId,
+        targetUserId,
+      );
+
+    if (participantsCount < 2) {
+      await ConversationService.deleteConversation(conversationId);
+      io.to(conversationId).emit("conversation:deleted", {
+        conversationId,
+        initiatorId: userId,
+      });
+      return res.json({ success: true });
+    }
+
+    io.to(conversationId).emit("conversation:userRemoved", {
+      conversationId,
+      userId: targetUserId,
+      participantsCount,
+    });
+
+    return res.json({ success: true });
+  }
+
+  static async leaveConversation(
+    req: Request<{ conversationId: string }>,
+    res: Response,
+  ) {
+    const userId = req.userId;
+    const { conversationId } = req.params;
+
+    const isParticipant = await ConversationService.getConversationParticipant(
+      conversationId,
+      userId,
+    );
+    if (!isParticipant) {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "You are not a participant of this conversation",
+      );
+    }
+
+    if (isParticipant.role === "OWNER") {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "Owner cannot leave the conversation. Please transfer ownership or delete the conversation.",
+      );
+    }
+
+    const { participantsCount } =
+      await ConversationService.deleteConversationParticipant(
+        conversationId,
+        userId,
+      );
+
+    if (participantsCount < 2) {
+      await ConversationService.deleteConversation(conversationId);
+      io.to(conversationId).emit("conversation:deleted", {
+        conversationId,
+        initiatorId: userId,
+      });
+      return res.json({ success: true });
+    }
+
+    io.to(conversationId).emit("conversation:userRemoved", {
+      conversationId,
+      userId,
+      participantsCount,
+    });
+
+    return res.json({ success: true });
+  }
+
+  static async getConversationParticipants(
+    req: Request<{ conversationId: string }>,
+    res: Response,
+  ) {
+    const userId = req.userId;
+    const { conversationId } = req.params;
+    const { cursor, take } = req.query as { cursor?: string; take?: string };
+
+    const isParticipant = await ConversationService.isParticipant(
+      conversationId,
+      userId,
+    );
+    if (!isParticipant) {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "You are not a participant of this conversation",
+      );
+    }
+
+    const { participants, hasMore } =
+      await ConversationService.getConversationParticipants(
+        conversationId,
+        cursor,
+        Number(take) || 10,
+      );
+
+    return res.json({ participants, hasMore });
+  }
+
+  static async addParticipantsToConversation(
+    req: Request<{ conversationId: string }>,
+    res: Response,
+  ) {
+    const userId = req.userId;
+    const { conversationId } = req.params;
+    const { participantIds } = req.body as { participantIds: string[] };
+
+    const participant = await ConversationService.getConversationParticipant(
+      conversationId,
+      userId,
+    );
+    if (!participant) {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "You are not a participant of this conversation",
+      );
+    }
+    if (participant?.role !== "OWNER") {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "You are not the owner of this conversation",
+      );
+    }
+
+    const { participantsCount } = await ConversationService.addParticipants(
+      conversationId,
+      participantIds,
+    );
+
+    console.log(participantsCount);
+
+    io.to(conversationId).emit("conversation:participantsAdded", {
+      conversationId,
+      participantIds,
+      participantsCount,
+    });
+
+    await Promise.all(
+      participantIds.map(async (participantId) => {
+        const conversation = await ConversationService.getConversationById(
+          conversationId,
+          participantId,
+        );
+        io.to(participantId).emit("conversation:new", {
+          conversation,
+          initiatorId: userId,
+        });
+      }),
+    );
+
     return res.json({ success: true });
   }
 }

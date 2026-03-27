@@ -24,6 +24,7 @@ router.post("/auth/google", AuthController.googleAuth);
 
 router.get("/user/me", authMiddleware, UserController.getMe);
 router.patch("/user", authMiddleware, UserController.updateUser);
+router.get("/user/:id", authMiddleware, UserController.getUserById);
 
 router.get(
   "/chat/conversation",
@@ -58,6 +59,30 @@ router.patch(
   "/chat/conversations/:id/settings",
   authMiddleware,
   ChatController.updateConversationSettings,
+);
+
+router.delete(
+  "/chat/conversations/:conversationId/participants/:participantId",
+  authMiddleware,
+  ChatController.removeUserFromConversation,
+);
+
+router.post(
+  "/chat/conversations/:conversationId/leave",
+  authMiddleware,
+  ChatController.leaveConversation,
+);
+
+router.get(
+  "/chat/conversations/:conversationId/participants",
+  authMiddleware,
+  ChatController.getConversationParticipants,
+);
+
+router.post(
+  "/chat/conversations/:conversationId/participants",
+  authMiddleware,
+  ChatController.addParticipantsToConversation,
 );
 
 router.post(

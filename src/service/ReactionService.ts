@@ -56,6 +56,7 @@ class ReactionService {
             avatarUrl: true,
             firstName: true,
             lastName: true,
+            lastSeenAt: true,
           },
         },
       },
@@ -79,6 +80,7 @@ class ReactionService {
             avatarUrl: true,
             firstName: true,
             lastName: true,
+            lastSeenAt: true,
           },
         },
       },
@@ -114,6 +116,7 @@ class ReactionService {
         firstName: string | null;
         lastName: string | null;
         avatarUrl: string | null;
+        lastSeenAt: Date;
         reaction: ReactorListItem["reaction"] | string;
       }[]
     >`
@@ -137,6 +140,7 @@ class ReactionService {
         u."firstName",
         u."lastName",
         u."avatarUrl",
+        u."lastSeenAt",
         json_build_object(
           'id',        rr."id",
           'content',   rr."content",
@@ -155,12 +159,12 @@ class ReactionService {
       firstName: row.firstName,
       lastName: row.lastName,
       avatarUrl: row.avatarUrl,
+      lastSeenAt: row.lastSeenAt,
       reaction:
         typeof row.reaction === "string"
           ? JSON.parse(row.reaction)
           : row.reaction,
     }));
-    console.log(items.length);
 
     const hasMore = items.length > take;
     if (hasMore) items.pop();

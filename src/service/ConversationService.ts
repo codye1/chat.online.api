@@ -1,8 +1,21 @@
+import { prisma } from "../lib/prisma";
+import { Prisma } from "../../generated/prisma/client";
+import ApiError from "../utils/ApiError";
+import {
+  Conversation,
+  ConversationPreview,
+  ConversationsInit,
+  ConversationTypes,
+  ConversationWithParticipants,
+  EditableConversationSettings,
+  FolderDto,
+  UserPreviewAtConversation,
+} from "../types/types";
+import FolderService from "./FolderService";
+import { stripUndefined } from "../utils/stripUndefined";
+
 const participantInclude = {
-  where: {
-    OR: [{ userId: undefined }, { userId: { not: undefined } }],
-  },
-  take: 2,
+  orderBy: { createdAt: "asc" as const },
   include: {
     user: {
       select: {
@@ -18,20 +31,6 @@ const participantInclude = {
     },
   },
 };
-import { prisma } from "../lib/prisma";
-import { Prisma } from "../../generated/prisma/client";
-import ApiError from "../utils/ApiError";
-import {
-  Conversation,
-  ConversationPreview,
-  ConversationsInit,
-  ConversationTypes,
-  ConversationWithParticipants,
-  EditableConversationSettings,
-  FolderDto,
-} from "../types/types";
-import FolderService from "./FolderService";
-import { stripUndefined } from "../utils/stripUndefined";
 
 class ConversationService {
   private static async mapConversationsToPreview(
@@ -100,6 +99,7 @@ class ConversationService {
           title: conversation.title ?? otherParticipant.user.nickname,
           avatarUrl: conversation.avatarUrl ?? otherParticipant.user.avatarUrl,
           unreadMessages: unreadCount,
+          createdAt: conversation.createdAt,
           lastMessage,
           activeUsers: [],
           otherParticipant: { id: otherParticipant.user.id },
@@ -108,6 +108,14 @@ class ConversationService {
         };
       }
 
+      const owner = conversation.participants.find((p) => p.role === "OWNER");
+      if (!owner) {
+        throw new ApiError(
+          500,
+          "CONVERSATION_OWNER_NOT_FOUND",
+          "Conversation owner not found",
+        );
+      }
       return {
         id: conversation.id,
         type: "GROUP" as const,
@@ -118,6 +126,9 @@ class ConversationService {
         activeUsers: [],
         isMuted: myParticipant.isMuted,
         isArchived: myParticipant.isArchived,
+        createdAt: conversation.createdAt,
+        participantsCount: conversation._count?.participants ?? 0,
+        ownerId: owner.user.id,
       };
     });
   }
@@ -142,7 +153,6 @@ class ConversationService {
         "Conversation participant not found",
       );
     }
-
     const title = conversation.title ?? otherParticipant.nickname;
 
     const avatarUrl = conversation.avatarUrl ?? otherParticipant.avatarUrl;
@@ -181,6 +191,7 @@ class ConversationService {
       id: conversation.id,
       avatarUrl,
       title,
+      createdAt: conversation.createdAt,
       isMuted: myParticipant.isMuted,
       isArchived: myParticipant.isArchived,
       type: conversation.type as ConversationTypes,
@@ -198,18 +209,44 @@ class ConversationService {
       activeUsers: [] as { nickname: string; reason: "typing" | "editing" }[],
     };
 
+    const participants: UserPreviewAtConversation[] = conversation.participants
+      .slice(0, 10) // перші 10 з вже завантажених (вже відсортовані по createdAt через participantInclude)
+      .map((p) => ({
+        id: p.user.id,
+        nickname: p.user.nickname,
+        firstName: p.user.firstName,
+        lastName: p.user.lastName,
+        avatarUrl: p.user.avatarUrl,
+        conversationId: conversation.id,
+        role: p.role,
+        lastSeenAt: p.user.lastSeenAt,
+      }));
+
     if (conversation.type === "DIRECT") {
       return {
         ...baseConversation,
         type: "DIRECT" as const,
         lastSeenAt,
-
         otherParticipant,
       };
     } else {
+      const ownerId = conversation.participants.find((p) => p.role === "OWNER")
+        ?.user?.id;
+      if (!ownerId) {
+        throw new ApiError(
+          500,
+          "CONVERSATION_OWNER_NOT_FOUND",
+          "Conversation owner not found",
+        );
+      }
       return {
         ...baseConversation,
         type: "GROUP" as const,
+        participantsCount: conversation._count?.participants ?? 0,
+        participants,
+        ownerId,
+        avatarUrl: conversation.avatarUrl,
+        hasMoreParticipants: conversation._count?.participants > 10,
       };
     }
   }
@@ -218,7 +255,6 @@ class ConversationService {
     userId: string,
     take = 20,
   ): Promise<ConversationsInit> {
-    // 1. Загружаем ВСЕ participant-записи юзера (для полных activeIds/archivedIds)
     const allParticipants = await prisma.conversationParticipant.findMany({
       where: { userId },
       select: {
@@ -235,7 +271,6 @@ class ConversationService {
       orderBy: { conversation: { updatedAt: "desc" } },
     });
 
-    // 2. Строим activeIds / archivedIds из ВСЕХ записей
     const activeIds = { pinned: [] as string[], unpinned: [] as string[] };
     const archivedIds = { pinned: [] as string[], unpinned: [] as string[] };
 
@@ -267,7 +302,6 @@ class ConversationService {
       return pa - pb;
     });
 
-    // 3. Загружаем только первые take диалогов с полными данными для byId
     const previewParticipants = await prisma.conversationParticipant.findMany({
       where: { userId },
       select: {
@@ -279,29 +313,16 @@ class ConversationService {
             type: true,
             avatarUrl: true,
             updatedAt: true,
+            createdAt: true,
+            _count: {
+              select: { participants: true },
+            },
             messages: {
               orderBy: { createdAt: "desc" },
               take: 1,
             },
             participants: {
-              where: {
-                OR: [{ userId }, { userId: { not: userId } }],
-              },
-              take: 2,
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    email: true,
-                    nickname: true,
-                    avatarUrl: true,
-                    lastName: true,
-                    firstName: true,
-                    biography: true,
-                    lastSeenAt: true,
-                  },
-                },
-              },
+              ...participantInclude,
             },
           },
         },
@@ -323,7 +344,6 @@ class ConversationService {
       byId[preview.id] = preview;
     }
 
-    // 4. Папки
     const folders = await prisma.folder.findMany({
       where: { userId },
       orderBy: { position: "asc" },
@@ -361,29 +381,15 @@ class ConversationService {
       ...(cursor ? { cursor: { id: cursor } } : {}),
       take: take + 1,
       include: {
+        _count: {
+          select: { participants: true },
+        },
         messages: {
           orderBy: { createdAt: "desc" },
           take: 1,
         },
         participants: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                nickname: true,
-                avatarUrl: true,
-                lastName: true,
-                firstName: true,
-                biography: true,
-                lastSeenAt: true,
-              },
-            },
-          },
-          where: {
-            OR: [{ userId: userId }, { userId: { not: userId } }],
-          },
-          take: 2,
+          ...participantInclude,
         },
       },
     });
@@ -412,29 +418,15 @@ class ConversationService {
         id: { in: ids },
       },
       include: {
+        _count: {
+          select: { participants: true },
+        },
         messages: {
           orderBy: { createdAt: "desc" },
           take: 1,
         },
         participants: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                nickname: true,
-                avatarUrl: true,
-                lastName: true,
-                firstName: true,
-                biography: true,
-                lastSeenAt: true,
-              },
-            },
-          },
-          where: {
-            OR: [{ userId: userId }, { userId: { not: userId } }],
-          },
-          take: 2,
+          ...participantInclude,
         },
       },
     });
@@ -475,29 +467,15 @@ class ConversationService {
         ],
       },
       include: {
+        _count: {
+          select: { participants: true },
+        },
         messages: {
           orderBy: { createdAt: "desc" },
           take: 1,
         },
         participants: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                nickname: true,
-                avatarUrl: true,
-                lastName: true,
-                firstName: true,
-                biography: true,
-                lastSeenAt: true,
-              },
-            },
-          },
-          where: {
-            OR: [{ userId: userId }, { userId: { not: userId } }],
-          },
-          take: 2,
+          ...participantInclude,
         },
       },
     });
@@ -515,11 +493,11 @@ class ConversationService {
         participants: { some: { userId } },
       },
       include: {
+        _count: {
+          select: { participants: true },
+        },
         participants: {
           ...participantInclude,
-          where: {
-            OR: [{ userId: userId }, { userId: { not: userId } }],
-          },
         },
         messages: {
           orderBy: { createdAt: "desc" },
@@ -547,15 +525,15 @@ class ConversationService {
         },
       },
       include: {
+        _count: {
+          select: { participants: true },
+        },
         messages: {
           orderBy: { createdAt: "desc" },
           take: 1,
         },
         participants: {
           ...participantInclude,
-          where: {
-            OR: [{ userId: userId }, { userId: { not: userId } }],
-          },
         },
       },
     });
@@ -568,35 +546,42 @@ class ConversationService {
     participantIds,
     title = null,
     userId,
+    avatarUrl = null,
+    type = "DIRECT",
   }: {
     participantIds: string[];
     title: string | null;
     userId: string;
+    avatarUrl?: string | null;
+    type?: ConversationTypes;
   }): Promise<Conversation | null> {
     const participantsHasAuthor = participantIds.includes(userId);
     if (!participantsHasAuthor) {
-      throw new Error("Author must be included in participants");
+      participantIds.push(userId);
     }
 
     const conversation = await prisma.conversation.create({
       data: {
         title,
+        avatarUrl,
+        type,
         participants: {
           create: participantIds.map((id) => ({
             userId: id,
+            role: id === userId ? "OWNER" : "PARTICIPANT",
           })),
         },
       },
       include: {
+        _count: {
+          select: { participants: true },
+        },
         messages: {
           orderBy: { createdAt: "desc" },
           take: 1,
         },
         participants: {
           ...participantInclude,
-          where: {
-            OR: [{ userId: userId }, { userId: { not: userId } }],
-          },
         },
       },
     });
@@ -616,7 +601,6 @@ class ConversationService {
       data: dataToUpdate,
     });
 
-    // if conversation was pinned in archive when we remove it from archive we need to remove pinned position because pinned conversations in archive and in active have different order and different pinned positions
     if (
       updated.archivedPinnedPosition !== null &&
       dataToUpdate.isArchived === false
@@ -644,6 +628,108 @@ class ConversationService {
     await prisma.conversation.delete({
       where: { id: conversationId },
     });
+  }
+
+  static async getConversationParticipant(
+    conversationId: string,
+    userId: string,
+  ) {
+    return await prisma.conversationParticipant.findUnique({
+      where: { userId_conversationId: { userId, conversationId } },
+    });
+  }
+
+  static async deleteConversationParticipant(
+    conversationId: string,
+    userId: string,
+  ) {
+    const [, participantsCount] = await prisma.$transaction([
+      prisma.conversationParticipant.delete({
+        where: { userId_conversationId: { userId, conversationId } },
+      }),
+      prisma.conversationParticipant.count({
+        where: { conversationId },
+      }),
+    ]);
+
+    return { participantsCount };
+  }
+
+  static async getConversationParticipants(
+    conversationId: string,
+    cursor?: string,
+    take = 10,
+  ): Promise<{ participants: UserPreviewAtConversation[]; hasMore: boolean }> {
+    const participants = await prisma.conversationParticipant.findMany({
+      where: { conversationId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            nickname: true,
+            avatarUrl: true,
+            firstName: true,
+            lastName: true,
+            lastSeenAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "asc" },
+      ...(cursor
+        ? {
+            cursor: {
+              userId_conversationId: { userId: cursor, conversationId },
+            },
+          }
+        : {}),
+      take: take + 1,
+      skip: cursor ? 1 : 0,
+    });
+
+    const hasMore = participants.length > take;
+    if (hasMore) {
+      participants.pop();
+    }
+
+    const formattedParticipants: UserPreviewAtConversation[] = participants.map(
+      (p) => ({
+        id: p.user.id,
+        nickname: p.user.nickname,
+        firstName: p.user.firstName,
+        lastName: p.user.lastName,
+        avatarUrl: p.user.avatarUrl,
+        conversationId,
+        role: p.role,
+        lastSeenAt: p.user.lastSeenAt,
+      }),
+    );
+
+    return { participants: formattedParticipants, hasMore };
+  }
+
+  static async addParticipants(conversationId: string, userIds: string[]) {
+    const lastMessage = await prisma.message.findFirst({
+      where: { conversationId },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const data = userIds.map((userId) => ({
+      conversationId,
+      userId,
+      lastReadMessageId: lastMessage ? lastMessage.id : null,
+      role: "PARTICIPANT" as const,
+    }));
+    const [, participantsCount] = await prisma.$transaction([
+      prisma.conversationParticipant.createMany({
+        data,
+        skipDuplicates: true,
+      }),
+      prisma.conversationParticipant.count({
+        where: { conversationId },
+      }),
+    ]);
+
+    return { participantsCount };
   }
 }
 

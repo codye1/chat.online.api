@@ -12,6 +12,8 @@ const initializeSocket = async (io: Server) => {
 
     socket.on("lastSeenAt:update", () => {
       UserService.updateLastSeenAt(socket.data.userId);
+      console.log("User" + socket.data.userId + "updated lasSeenAt");
+
       io.to(`lastSeenAt:${socket.data.userId}`).emit("lastSeenAt:update", {
         userId: socket.data.userId,
         lastSeenAt: new Date(),
@@ -74,6 +76,10 @@ const initializeSocket = async (io: Server) => {
       },
     );
 
+    socket.on("conversation:leave", async (conversationId: string) => {
+      socket.leave(conversationId);
+    });
+
     socket.on(
       "conversation:join",
       async (data: {
@@ -118,25 +124,16 @@ const initializeSocket = async (io: Server) => {
       },
     );
 
-    socket.on("conversation:leave", async (conversationId: string) => {
-      // Verify membership before allowing leave
-      const isParticipant = await ConversationService.isParticipant(
-        conversationId,
-        socket.data.userId,
-      );
+    socket.on(
+      "conversation:leave",
+      async ({ conversationId }: { conversationId: string[] }) => {
+        conversationId.forEach((id) => socket.leave(id));
 
-      if (!isParticipant) {
-        socket.emit("error", {
-          message: "User is not a participant in this conversation",
-        });
-        return;
-      }
-
-      socket.leave(conversationId);
-      console.log(
-        `User ${socket.data.userId} ${socket.id} left conversation ${conversationId}`,
-      );
-    });
+        console.log(
+          `User ${socket.data.userId} ${socket.id} left conversation ${conversationId}`,
+        );
+      },
+    );
 
     socket.on("message:send", async (data) => {
       const {

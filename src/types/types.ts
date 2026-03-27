@@ -8,7 +8,35 @@ interface User {
   biography: string | null;
   lastSeenAt: Date;
 }
+
+type UserPreview = {
+  id: string;
+  nickname: string;
+  firstName: string | null;
+  lastName: string | null;
+  avatarUrl: string | null;
+  lastSeenAt: Date;
+};
+
+type Roles = "OWNER" | "PARTICIPANT";
+type UserPreviewAtConversation = UserPreview & {
+  conversationId: string;
+  role: Roles;
+};
+
 type ConversationTypes = "DIRECT" | "GROUP";
+
+interface ConversationParticipant {
+  id: string;
+  userId: string;
+  conversationId: string;
+  pinnedPosition: number | null;
+  archivedPinnedPosition: number | null;
+  isArchived: boolean;
+  isMuted: boolean;
+  lastReadMessageId: string | null;
+  role: Roles;
+}
 
 interface BaseConversationData {
   id: string;
@@ -18,6 +46,7 @@ interface BaseConversationData {
   unreadMessages: number;
   isArchived: boolean;
   isMuted: boolean;
+  createdAt: Date;
   lastMessage: { text: string; createdAt: string; id: string } | null;
   activeUsers: { nickname: string; reason: "typing" | "editing" }[];
 }
@@ -39,6 +68,10 @@ interface DirectConversation extends BaseConversation {
 
 interface GroupConversation extends BaseConversation {
   type: "GROUP";
+  participantsCount: number;
+  participants: UserPreviewAtConversation[];
+  hasMoreParticipants: boolean;
+  ownerId: string;
 }
 
 type Conversation = DirectConversation | GroupConversation;
@@ -52,6 +85,7 @@ interface DirectPreview extends BaseConversationData {
 
 interface GroupPreview extends BaseConversationData {
   type: "GROUP";
+  ownerId: string;
 }
 
 type ConversationPreview = DirectPreview | GroupPreview;
@@ -84,22 +118,19 @@ interface ConversationWithParticipants {
   title: string | null;
   avatarUrl: string | null;
   messages?: { id: string; text: string; createdAt: Date }[];
+  createdAt: Date;
+  _count: {
+    participants: number;
+  };
   participants: {
     userId: string;
     lastReadMessageId: string | null;
     user: User;
     isMuted: boolean;
     isArchived: boolean;
+    role: Roles;
   }[];
 }
-
-type UserPreview = {
-  id: string;
-  nickname: string;
-  firstName: string | null;
-  lastName: string | null;
-  avatarUrl: string | null;
-};
 
 type Reaction = {
   id: string;
@@ -133,7 +164,7 @@ interface Message {
   id: string;
   text: string;
   conversationId: string;
-  sender: UserPreview;
+  sender: UserPreviewAtConversation;
   createdAt: string;
   reactions: GroupedReactions;
   replyTo?: ReplyMessage | null;
@@ -142,6 +173,7 @@ interface Message {
 
 export type {
   User,
+  Roles,
   Conversation,
   ConversationPreview,
   ConversationsInit,
@@ -152,7 +184,9 @@ export type {
   MessageMedia,
   GroupedReactions,
   UserPreview,
+  UserPreviewAtConversation,
   Reaction,
   ReactorListItem,
   EditableConversationSettings,
+  ConversationParticipant,
 };

@@ -1,6 +1,12 @@
 import { Prisma } from "../../generated/prisma/client";
 import { prisma } from "../lib/prisma";
-import { GroupedReactions, Message, MessageMedia } from "../types/types";
+import {
+  GroupedReactions,
+  Message,
+  MessageMedia,
+  Roles,
+  UserPreviewAtConversation,
+} from "../types/types";
 
 class MessageService {
   static async createMessage({
@@ -26,6 +32,7 @@ class MessageService {
             firstName: true,
             lastName: true,
             avatarUrl: true,
+            lastSeenAt: true,
           },
         },
         replyTo: {
@@ -39,11 +46,18 @@ class MessageService {
                 firstName: true,
                 lastName: true,
                 avatarUrl: true,
+                lastSeenAt: true,
               },
             },
           },
         },
       },
+    });
+
+    // Fetch the participant role for the sender in this conversation
+    const participant = await prisma.conversationParticipant.findUnique({
+      where: { userId_conversationId: { userId: senderId, conversationId } },
+      select: { role: true },
     });
 
     let createdMedia: MessageMedia[] = [];
@@ -61,7 +75,11 @@ class MessageService {
       text: message.text,
       conversationId: message.conversationId,
       createdAt: message.createdAt.toISOString(),
-      sender: message.sender,
+      sender: {
+        ...message.sender,
+        conversationId,
+        role: (participant?.role ?? "PARTICIPANT") as Roles,
+      } satisfies UserPreviewAtConversation,
       replyTo: message.replyTo,
       reactions: {} as GroupedReactions,
       media: createdMedia.length > 0 ? createdMedia : undefined,
@@ -382,11 +400,13 @@ class MessageService {
       m."conversationId",
       to_char(m."createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",
       json_build_object(
-        'id',        u."id",
-        'nickname',  u."nickname",
-        'firstName', u."firstName",
-        'lastName',  u."lastName",
-        'avatarUrl', u."avatarUrl"
+        'id',             u."id",
+        'nickname',       u."nickname",
+        'firstName',      u."firstName",
+        'lastName',       u."lastName",
+        'avatarUrl',      u."avatarUrl",
+        'conversationId', cp."conversationId",
+        'role',           cp."role"
       ) AS sender,
       COALESCE(rg.reactions, '{}'::json) AS reactions,
       CASE
@@ -407,6 +427,7 @@ class MessageService {
       mg.media AS media
     FROM msg m
     JOIN "User" u ON u."id" = m."senderId"
+    LEFT JOIN "ConversationParticipant" cp ON cp."userId" = m."senderId" AND cp."conversationId" = m."conversationId"
     LEFT JOIN reactions_grouped rg ON rg."messageId" = m.id
     LEFT JOIN "Message" rm ON rm."id" = m."replyToMessageId"
     LEFT JOIN "User" ru ON ru."id" = rm."senderId"
