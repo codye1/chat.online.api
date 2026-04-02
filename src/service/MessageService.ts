@@ -1,6 +1,12 @@
 import { Prisma } from "../../generated/prisma/client";
 import { prisma } from "../lib/prisma";
-import { GroupedReactions, Message, MessageMedia } from "../types/types";
+import {
+  GroupedReactions,
+  Message,
+  MessageMedia,
+  Roles,
+  UserPreviewAtConversation,
+} from "../types/types";
 
 class MessageService {
   static async createMessage({
@@ -26,6 +32,7 @@ class MessageService {
             firstName: true,
             lastName: true,
             avatarUrl: true,
+            lastSeenAt: true,
           },
         },
         replyTo: {
@@ -39,11 +46,18 @@ class MessageService {
                 firstName: true,
                 lastName: true,
                 avatarUrl: true,
+                lastSeenAt: true,
               },
             },
           },
         },
       },
+    });
+
+    // Fetch the participant role for the sender in this conversation
+    const participant = await prisma.conversationParticipant.findUnique({
+      where: { userId_conversationId: { userId: senderId, conversationId } },
+      select: { role: true },
     });
 
     let createdMedia: MessageMedia[] = [];
@@ -61,7 +75,11 @@ class MessageService {
       text: message.text,
       conversationId: message.conversationId,
       createdAt: message.createdAt.toISOString(),
-      sender: message.sender,
+      sender: {
+        ...message.sender,
+        conversationId,
+        role: (participant?.role ?? "PARTICIPANT") as Roles,
+      } satisfies UserPreviewAtConversation,
       replyTo: message.replyTo,
       reactions: {} as GroupedReactions,
       media: createdMedia.length > 0 ? createdMedia : undefined,
@@ -382,11 +400,14 @@ class MessageService {
       m."conversationId",
       to_char(m."createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",
       json_build_object(
-        'id',        u."id",
-        'nickname',  u."nickname",
-        'firstName', u."firstName",
-        'lastName',  u."lastName",
-        'avatarUrl', u."avatarUrl"
+        'id',             u."id",
+        'nickname',       u."nickname",
+        'firstName',      u."firstName",
+        'lastName',       u."lastName",
+        'avatarUrl',      u."avatarUrl",
+        'lastSeenAt',     u."lastSeenAt",
+        'conversationId', COALESCE(cp."conversationId", m."conversationId"),
+        'role',           COALESCE(cp."role"::text, 'PARTICIPANT')
       ) AS sender,
       COALESCE(rg.reactions, '{}'::json) AS reactions,
       CASE
@@ -407,6 +428,7 @@ class MessageService {
       mg.media AS media
     FROM msg m
     JOIN "User" u ON u."id" = m."senderId"
+    LEFT JOIN "ConversationParticipant" cp ON cp."userId" = m."senderId" AND cp."conversationId" = m."conversationId"
     LEFT JOIN reactions_grouped rg ON rg."messageId" = m.id
     LEFT JOIN "Message" rm ON rm."id" = m."replyToMessageId"
     LEFT JOIN "User" ru ON ru."id" = rm."senderId"
@@ -414,27 +436,48 @@ class MessageService {
     ORDER BY m.id ASC
   `;
 
-    return rows.map((row) => ({
-      ...row,
-      createdAt:
-        row.createdAt instanceof Date
-          ? row.createdAt.toISOString()
-          : (row.createdAt as string),
-      sender:
-        typeof row.sender === "string" ? JSON.parse(row.sender) : row.sender,
-      reactions:
-        typeof row.reactions === "string"
-          ? JSON.parse(row.reactions)
-          : (row.reactions ?? {}),
-      replyTo:
-        typeof row.replyTo === "string"
-          ? JSON.parse(row.replyTo)
-          : (row.replyTo ?? null),
-      media:
-        typeof row.media === "string"
-          ? JSON.parse(row.media)
-          : (row.media ?? null),
-    }));
+    return rows.map((row) => {
+      const parsedSender:
+        | (Partial<Message["sender"]> & {
+            role?: Roles | string;
+            conversationId?: string;
+            lastSeenAt?: Date | string;
+          })
+        | null =
+        typeof row.sender === "string"
+          ? JSON.parse(row.sender)
+          : (row.sender as Message["sender"]);
+
+      return {
+        ...row,
+        createdAt:
+          row.createdAt instanceof Date
+            ? row.createdAt.toISOString()
+            : (row.createdAt as string),
+        sender: {
+          ...(parsedSender ?? {}),
+          conversationId:
+            parsedSender?.conversationId ?? (row.conversationId as string),
+          role: (parsedSender?.role ?? "PARTICIPANT") as Roles,
+          lastSeenAt:
+            parsedSender?.lastSeenAt instanceof Date
+              ? parsedSender.lastSeenAt
+              : new Date(parsedSender?.lastSeenAt ?? 0),
+        } as Message["sender"],
+        reactions:
+          typeof row.reactions === "string"
+            ? JSON.parse(row.reactions)
+            : (row.reactions ?? {}),
+        replyTo:
+          typeof row.replyTo === "string"
+            ? JSON.parse(row.replyTo)
+            : (row.replyTo ?? null),
+        media:
+          typeof row.media === "string"
+            ? JSON.parse(row.media)
+            : (row.media ?? null),
+      };
+    });
   }
 }
 

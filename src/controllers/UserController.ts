@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import UserService from "../service/UserService";
 import ApiError from "../utils/ApiError";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/client";
+import ConversationService from "../service/ConversationService";
 
 class UserController {
   static async updateUser(req: Request, res: Response) {
@@ -69,6 +70,31 @@ class UserController {
 
     const { password: _password, ...userWithoutPassword } = user;
     res.json(userWithoutPassword);
+  }
+
+  static async getUserById(req: Request, res: Response) {
+    const userId = req.userId;
+    const recipientId = req.params.id as string;
+
+    const [user, directConversationResult] = await Promise.all([
+      UserService.getUserById(recipientId),
+      ConversationService.getConversationByUsersId(
+        [userId, recipientId],
+        userId,
+      ),
+    ]);
+
+    const directConversationId = directConversationResult
+      ? directConversationResult.id
+      : null;
+
+    if (!user) {
+      throw new ApiError(404, "USER_NOT_FOUND", "User not found");
+    }
+
+    const { password: _password, ...userWithoutPassword } = user;
+
+    res.json({ user: userWithoutPassword, directConversationId });
   }
 }
 
