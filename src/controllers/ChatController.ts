@@ -6,12 +6,12 @@ import ApiError from "../utils/ApiError";
 import ReactionService from "../service/ReactionService";
 import FolderService from "../service/FolderService";
 import { EditableConversationSettings, UserPreview } from "../types/types";
-import { io } from "..";
+import { getIo } from "../lib/io";
 
 interface CreateConversationData {
   participantIds: string[];
-  title: string;
-  avatarUrl: string | null;
+  title?: string | null;
+  avatarUrl?: string | null;
   type: "DIRECT" | "GROUP";
 }
 
@@ -91,35 +91,78 @@ class ChatController {
       req.body as CreateConversationData;
     const userId = req.userId;
 
-    if (participantIds.includes(userId)) {
+    if (type !== "DIRECT" && type !== "GROUP") {
       throw new ApiError(
         400,
         "INVALID_INPUT",
-        "Creator cannot be included in participantIds",
+        "Conversation type must be DIRECT or GROUP",
       );
     }
 
-    if (participantIds.length < 1) {
+    if (!Array.isArray(participantIds) || participantIds.length === 0) {
       throw new ApiError(
         400,
         "INVALID_INPUT",
-        "At least 1 participant (other than the creator) is required to create a conversation",
+        "participantIds must be a non-empty array",
       );
     }
 
-    if (title && title.trim() === "")
+    if (
+      participantIds.some(
+        (participantId) =>
+          typeof participantId !== "string" || participantId.trim() === "",
+      )
+    ) {
+      throw new ApiError(
+        400,
+        "INVALID_INPUT",
+        "participantIds must contain only non-empty string ids",
+      );
+    }
+
+    const normalizedParticipantIds = [...new Set([...participantIds, userId])];
+
+    if (type === "DIRECT" && normalizedParticipantIds.length !== 2) {
+      throw new ApiError(
+        400,
+        "INVALID_INPUT",
+        "DIRECT conversation must contain exactly 2 participants",
+      );
+    }
+
+    if (type === "GROUP" && normalizedParticipantIds.length < 2) {
+      throw new ApiError(
+        400,
+        "INVALID_INPUT",
+        "GROUP conversation must contain at least 2 recipients",
+      );
+    }
+
+    if (type === "GROUP" && (!title || title.trim() === "")) {
+      throw new ApiError(
+        400,
+        "INVALID_INPUT",
+        "Title is required for GROUP conversation",
+      );
+    }
+
+    if (typeof title === "string" && title.trim() === "") {
       throw new ApiError(400, "INVALID_INPUT", "Title cannot be empty");
+    }
+
+    const preparedTitle =
+      typeof title === "string" && title.trim() !== "" ? title.trim() : null;
 
     const conversation = await ConversationService.createConversation({
-      participantIds,
-      title,
+      participantIds: normalizedParticipantIds,
+      title: preparedTitle,
       userId,
-      avatarUrl,
+      avatarUrl: avatarUrl ?? null,
       type,
     });
 
-    participantIds.forEach((id) => {
-      io.to(id).emit("conversation:new", {
+    normalizedParticipantIds.forEach((id) => {
+      getIo().to(id).emit("conversation:new", {
         conversation,
         initiatorId: userId,
       });
@@ -239,12 +282,6 @@ class ChatController {
       cursor?: string;
       take?: number;
     };
-
-    console.log({
-      messageId,
-      reactionContent,
-      cursor,
-    });
 
     const reactions = await ReactionService.getReactorsByMessage({
       messageId,
@@ -409,6 +446,11 @@ class ChatController {
       conversationId,
       userId,
     );
+    const conversation = await ConversationService.getConversationById(
+      conversationId,
+      userId,
+    );
+
     if (!participant) {
       throw new ApiError(
         403,
@@ -416,7 +458,7 @@ class ChatController {
         "You are not a participant of this conversation",
       );
     }
-    if (participant.role !== "OWNER") {
+    if (participant.role !== "OWNER" && conversation?.type === "GROUP") {
       throw new ApiError(
         403,
         "FORBIDDEN",
@@ -424,7 +466,7 @@ class ChatController {
       );
     }
     await ConversationService.deleteConversation(conversationId);
-    io.to(conversationId).emit("conversation:deleted", {
+    getIo().to(conversationId).emit("conversation:deleted", {
       conversationId,
       initiatorId: userId,
     });
@@ -515,14 +557,14 @@ class ChatController {
 
     if (participantsCount < 2) {
       await ConversationService.deleteConversation(conversationId);
-      io.to(conversationId).emit("conversation:deleted", {
+      getIo().to(conversationId).emit("conversation:deleted", {
         conversationId,
         initiatorId: userId,
       });
       return res.json({ success: true });
     }
 
-    io.to(conversationId).emit("conversation:userRemoved", {
+    getIo().to(conversationId).emit("conversation:userRemoved", {
       conversationId,
       userId: targetUserId,
       participantsCount,
@@ -566,14 +608,14 @@ class ChatController {
 
     if (participantsCount < 2) {
       await ConversationService.deleteConversation(conversationId);
-      io.to(conversationId).emit("conversation:deleted", {
+      getIo().to(conversationId).emit("conversation:deleted", {
         conversationId,
         initiatorId: userId,
       });
       return res.json({ success: true });
     }
 
-    io.to(conversationId).emit("conversation:userRemoved", {
+    getIo().to(conversationId).emit("conversation:userRemoved", {
       conversationId,
       userId,
       participantsCount,
@@ -644,9 +686,7 @@ class ChatController {
       participantIds,
     );
 
-    console.log(participantsCount);
-
-    io.to(conversationId).emit("conversation:participantsAdded", {
+    getIo().to(conversationId).emit("conversation:participantsAdded", {
       conversationId,
       participantIds,
       participantsCount,
@@ -658,7 +698,7 @@ class ChatController {
           conversationId,
           participantId,
         );
-        io.to(participantId).emit("conversation:new", {
+        getIo().to(participantId).emit("conversation:new", {
           conversation,
           initiatorId: userId,
         });

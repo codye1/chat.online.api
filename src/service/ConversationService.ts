@@ -210,7 +210,7 @@ class ConversationService {
     };
 
     const participants: UserPreviewAtConversation[] = conversation.participants
-      .slice(0, 10) // перші 10 з вже завантажених (вже відсортовані по createdAt через participantInclude)
+      .slice(0, 10) // перші 10 з вже завантажених
       .map((p) => ({
         id: p.user.id,
         nickname: p.user.nickname,

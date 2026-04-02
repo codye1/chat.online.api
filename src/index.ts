@@ -7,6 +7,7 @@ import errorMiddleware from "./middlewares/errorMiddleware";
 import { Server } from "socket.io";
 import socketAuthMiddleware from "./middlewares/socketAuthMiddleware";
 import initializeSocket from "./socket";
+import { setIo } from "./lib/io";
 
 const app = express();
 const server = http.createServer(app);
@@ -44,10 +45,9 @@ const io = new Server(server, {
   cors: corsOptions,
 });
 
+setIo(io);
 io.use(socketAuthMiddleware);
 initializeSocket(io);
 server.listen(PORT, () => {
   console.log(`API listening on http://localhost:${PORT}`);
 });
-
-export { io };

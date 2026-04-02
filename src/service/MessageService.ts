@@ -405,8 +405,9 @@ class MessageService {
         'firstName',      u."firstName",
         'lastName',       u."lastName",
         'avatarUrl',      u."avatarUrl",
-        'conversationId', cp."conversationId",
-        'role',           cp."role"
+        'lastSeenAt',     u."lastSeenAt",
+        'conversationId', COALESCE(cp."conversationId", m."conversationId"),
+        'role',           COALESCE(cp."role"::text, 'PARTICIPANT')
       ) AS sender,
       COALESCE(rg.reactions, '{}'::json) AS reactions,
       CASE
@@ -435,27 +436,48 @@ class MessageService {
     ORDER BY m.id ASC
   `;
 
-    return rows.map((row) => ({
-      ...row,
-      createdAt:
-        row.createdAt instanceof Date
-          ? row.createdAt.toISOString()
-          : (row.createdAt as string),
-      sender:
-        typeof row.sender === "string" ? JSON.parse(row.sender) : row.sender,
-      reactions:
-        typeof row.reactions === "string"
-          ? JSON.parse(row.reactions)
-          : (row.reactions ?? {}),
-      replyTo:
-        typeof row.replyTo === "string"
-          ? JSON.parse(row.replyTo)
-          : (row.replyTo ?? null),
-      media:
-        typeof row.media === "string"
-          ? JSON.parse(row.media)
-          : (row.media ?? null),
-    }));
+    return rows.map((row) => {
+      const parsedSender:
+        | (Partial<Message["sender"]> & {
+            role?: Roles | string;
+            conversationId?: string;
+            lastSeenAt?: Date | string;
+          })
+        | null =
+        typeof row.sender === "string"
+          ? JSON.parse(row.sender)
+          : (row.sender as Message["sender"]);
+
+      return {
+        ...row,
+        createdAt:
+          row.createdAt instanceof Date
+            ? row.createdAt.toISOString()
+            : (row.createdAt as string),
+        sender: {
+          ...(parsedSender ?? {}),
+          conversationId:
+            parsedSender?.conversationId ?? (row.conversationId as string),
+          role: (parsedSender?.role ?? "PARTICIPANT") as Roles,
+          lastSeenAt:
+            parsedSender?.lastSeenAt instanceof Date
+              ? parsedSender.lastSeenAt
+              : new Date(parsedSender?.lastSeenAt ?? 0),
+        } as Message["sender"],
+        reactions:
+          typeof row.reactions === "string"
+            ? JSON.parse(row.reactions)
+            : (row.reactions ?? {}),
+        replyTo:
+          typeof row.replyTo === "string"
+            ? JSON.parse(row.replyTo)
+            : (row.replyTo ?? null),
+        media:
+          typeof row.media === "string"
+            ? JSON.parse(row.media)
+            : (row.media ?? null),
+      };
+    });
   }
 }
 
