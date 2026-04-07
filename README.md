@@ -1,48 +1,48 @@
 # chat.online.api
 
-Backend API для чату на Express + Socket.IO + Prisma (PostgreSQL/Neon).
+Backend API for chat on Express + Socket.IO + Prisma (PostgreSQL/Neon).
 
-## Що всередині
+## What's inside
 
-- JWT-автентифікація (access token + refresh token у httpOnly cookie)
-- REST API для користувачів, діалогів, повідомлень, папок і реакцій
-- Real-time події через Socket.IO
-- Prisma ORM і міграції
+- JWT authentication (access token + refresh token in httpOnly cookie)
+- REST API for users, dialogs, messages, folders, and reactions
+- Real-time events via Socket.IO
+- Prisma ORM and migrations
 
-## Технології
+## Technologies
 
 - Node.js + TypeScript
 - Express 5
 - Socket.IO 4
 - Prisma 7
-- PostgreSQL (через Prisma Neon adapter)
+- PostgreSQL (via Prisma Neon adapter)
 
-## Структура проєкту
+## Project Structure
 
-- src/index.ts: вхідна точка HTTP і Socket.IO
-- src/router/router.ts: маршрути REST API
-- src/controllers: HTTP-контролери
-- src/service: бізнес-логіка та доступ до даних
-- src/socket.ts: реєстрація Socket.IO обробників
-- src/socketHandlers: декомпозовані realtime-обробники
-- src/lib/prisma.ts: Prisma клієнт
-- src/lib/io.ts: спільний екземпляр Socket.IO (без циклічних імпортів)
-- prisma/schema.prisma: схема БД
-- prisma/migrations: міграції
+- src/index.ts: entry point for HTTP and Socket.IO
+- src/router/router.ts: REST API routes
+- src/controllers: HTTP controllers
+- src/service: business logic and data access
+- src/socket.ts: Socket.IO handlers registration
+- src/socketHandlers: decomposed realtime handlers
+- src/lib/prisma.ts: Prisma client
+- src/lib/io.ts: shared Socket.IO instance (avoids cyclic imports)
+- prisma/schema.prisma: DB schema
+- prisma/migrations: migrations
 
-## Швидкий старт
+## Quick Start
 
-## 1. Встановлення
+### 1. Installation
 
 ```bash
 npm install
 ```
 
-## 2. Змінні середовища
+### 2. Environment Variables
 
-Створіть файл .env у корені проєкту.
+Create a .env file in the project root.
 
-Мінімальний набір:
+Minimal set:
 
 ```env
 DATABASE_URL=postgresql://USER:PASSWORD@HOST:PORT/DB
@@ -56,34 +56,34 @@ JWT_ACCESS_EXPIRES_IN=15m
 JWT_REFRESH_EXPIRES_IN=30d
 ```
 
-Примітки:
+Notes:
 
-- CORS приймає список origin через кому.
-- JWT_ACCESS_EXPIRES_IN і JWT_REFRESH_EXPIRES_IN опціональні, є дефолти 15m і 30d.
-- За відсутності обов'язкових змінних getEnv викидає помилку під час старту.
+- CORS accepts a comma-separated list of origins.
+- JWT_ACCESS_EXPIRES_IN and JWT_REFRESH_EXPIRES_IN are optional, defaults are 15m and 30d.
+- If required variables are missing, getEnv throws an error at startup.
 
-## 3. Міграції Prisma
+### 3. Prisma Migrations
 
 ```bash
 npx prisma migrate dev
 npx prisma generate
 ```
 
-Якщо потрібно просто застосувати наявні міграції:
+If you just need to apply existing migrations:
 
 ```bash
 npx prisma migrate deploy
 ```
 
-## 4. Запуск
+### 4. Run
 
-Режим розробки:
+Development mode:
 
 ```bash
 npm run dev
 ```
 
-Додатково:
+Additionally:
 
 ```bash
 npm run lint
@@ -91,22 +91,22 @@ npm run format
 npm run seed:reactions
 ```
 
-## Автентифікація
+## Authentication
 
 ### Access token
 
-- Передається в заголовку Authorization: Bearer <token>
-- Перевіряється у src/middlewares/authMiddleware.ts
+- Sent in Authorization header: Bearer <token>
+- Checked in src/middlewares/authMiddleware.ts
 
 ### Refresh token
 
-- Зберігається в cookie refreshToken (httpOnly)
-- Видається при login/register/refresh
-- Використовується ендпоінтом POST /auth/refresh
+- Stored in refreshToken cookie (httpOnly)
+- Issued on login/register/refresh
+- Used by POST /auth/refresh endpoint
 
-## Формат помилок
+## Error Format
 
-Помилки повертаються в єдиному форматі:
+Errors are returned in a unified format:
 
 ```json
 {
@@ -119,12 +119,12 @@ npm run seed:reactions
 
 ## REST API
 
-Базовий URL: http://localhost:3000
+Base URL: http://localhost:3000
 
 ### Public
 
-- GET /: вітальна відповідь
-- GET /health: healthcheck + кількість користувачів
+- GET /: welcome response
+- GET /health: healthcheck + user count
 - POST /auth/register
 - POST /auth/login
 - POST /auth/refresh
@@ -141,7 +141,7 @@ npm run seed:reactions
 
 #### Chat: conversations
 
-- GET /chat/conversation?conversationId=... або ?recipientId=...
+- GET /chat/conversation?conversationId=... or ?recipientId=...
 - GET /chat/conversations/init
 - GET /chat/conversations?ids=id1,id2
 - POST /chat/conversations
@@ -171,9 +171,9 @@ npm run seed:reactions
 
 - GET /chat/search?query=...&type=users
 
-## Важливі деталі щодо create conversation
+## Important Details about Create Conversation
 
-POST /chat/conversations приймає:
+POST /chat/conversations accepts:
 
 ```json
 {
@@ -184,30 +184,30 @@ POST /chat/conversations приймає:
 }
 ```
 
-Валідація в контролері включає:
+Validation in the controller includes:
 
-- type має бути DIRECT або GROUP
-- participantIds має бути непорожнім масивом рядків
-- для GROUP обов'язковий title
-- для DIRECT має бути діалог 1:1 (два учасники в підсумковому наборі)
+- type must be DIRECT or GROUP
+- participantIds must be a non-empty array of strings
+- for GROUP, title is required
+- for DIRECT, must be a 1:1 dialog (two participants in the final set)
 
-## Пагінація повідомлень
+## Message Pagination
 
-GET /chat/conversations/:id/messages підтримує query параметри:
+GET /chat/conversations/:id/messages supports query parameters:
 
-- cursor: id повідомлення
-- direction: UP або DOWN
+- cursor: message id
+- direction: UP or DOWN
 - jumpToLatest: true/false
 
 ## Socket.IO
 
-### Підключення
+### Connection
 
-- Socket сервер підіймається в src/index.ts
-- Авторизація сокета через handshake.auth.token
+- Socket server is started in src/index.ts
+- Socket authorization via handshake.auth.token
 - Middleware: src/middlewares/socketAuthMiddleware.ts
 
-Приклад клієнта:
+Client example:
 
 ```ts
 const socket = io("http://localhost:3000", {
@@ -217,12 +217,12 @@ const socket = io("http://localhost:3000", {
 });
 ```
 
-### Кімнати
+### Rooms
 
-- Користувач автоматично приєднується до кімнати з іменем userId
-- Для чатів клієнт підписується на conversationId через подію conversation:join
+- User automatically joins a room named after their userId
+- For chats, client subscribes to conversationId via conversation:join event
 
-### Клієнт -> сервер події
+### Client -> Server Events
 
 - lastSeenAt:update
 - subscribe:lastSeenAt (payload: userId)
@@ -238,7 +238,7 @@ const socket = io("http://localhost:3000", {
 - reaction:add (payload: { messageId, content })
 - reaction:remove (payload: { messageId })
 
-### Сервер -> клієнт події
+### Server -> Client Events
 
 - lastSeenAt:update
 - activity:start
@@ -258,9 +258,9 @@ const socket = io("http://localhost:3000", {
 - error
 - conversation:error
 
-## Модель даних (коротко)
+## Data Model (short)
 
-Основні сутності Prisma:
+Main Prisma entities:
 
 - User
 - Conversation
@@ -272,10 +272,10 @@ const socket = io("http://localhost:3000", {
 - FolderConversation
 - RefreshToken
 
-Схема: prisma/schema.prisma
+Schema: prisma/schema.prisma
 
-## Корисно знати
+## Good to Know
 
-- Код використовує декомпозицію сокет-логіки за файлами в src/socketHandlers.
-- Екземпляр Socket.IO винесено в src/lib/io.ts, щоб уникнути циклічних залежностей.
-- Для production бажано налаштувати strict CORS і HTTPS, а також ротацію JWT secrets.
+- The code uses decomposition of socket logic by files in src/socketHandlers.
+- Socket.IO instance is moved to src/lib/io.ts to avoid cyclic dependencies.
+- For production, it is recommended to set up strict CORS and HTTPS, as well as JWT secrets rotation.
