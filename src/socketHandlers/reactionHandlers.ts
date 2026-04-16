@@ -1,6 +1,7 @@
 import ConversationService from "../service/ConversationService";
 import MessageService from "../service/MessageService";
 import ReactionService from "../service/ReactionService";
+import SocketError from "../utils/SocketError";
 import { SocketHandlerContext } from "./types";
 
 type AddReactionPayload = {
@@ -12,88 +13,115 @@ type RemoveReactionPayload = {
   messageId: string;
 };
 
+type Callback = (data: {
+  error: SocketError | { message: string; status: number; code: string };
+}) => void;
+
 export const registerReactionHandlers = ({
   socket,
 }: Pick<SocketHandlerContext, "socket">) => {
-  socket.on("reaction:add", async (data: AddReactionPayload) => {
-    const { messageId, content } = data;
+  socket.on(
+    "reaction:add",
+    async (data: AddReactionPayload, callback?: Callback) => {
+      const { messageId, content } = data;
+      try {
+        const message = await MessageService.getMessageById(messageId);
 
-    try {
-      const message = await MessageService.getMessageById(messageId);
-
-      const isParticipant = await ConversationService.isParticipant(
-        message.conversationId,
-        socket.data.userId,
-      );
-
-      if (!isParticipant) {
-        socket.emit("error", {
-          message: "User is not a participant in this conversation",
-        });
-        return;
-      }
-      const { newReaction, prevReaction } =
-        await ReactionService.upsertReaction(
-          messageId,
+        const isParticipant = await ConversationService.isParticipant(
+          message.conversationId,
           socket.data.userId,
-          content,
         );
 
-      socket.to(message.conversationId).emit("reaction:new", {
-        conversationId: message.conversationId,
-        messageId,
-        newReaction,
-        prevReaction,
-      });
+        if (!isParticipant) {
+          throw new SocketError(
+            403,
+            "CONVERSATION_NOT_A_PARTICIPANT",
+            "User is not a participant in this conversation",
+          );
+        }
+        const { newReaction, prevReaction } =
+          await ReactionService.upsertReaction(
+            messageId,
+            socket.data.userId,
+            content,
+          );
 
-      console.log(
-        `User ${socket.data.userId} ${socket.id} added reaction to message ${messageId}`,
-      );
-    } catch (error) {
-      console.error("Error in reaction:add handler:", error);
-      socket.emit("error", {
-        message: "Failed to add reaction",
-      });
-    }
-  });
-
-  socket.on("reaction:remove", async (data: RemoveReactionPayload) => {
-    const { messageId } = data;
-
-    try {
-      const message = await MessageService.getMessageById(messageId);
-
-      const isParticipant = await ConversationService.isParticipant(
-        message.conversationId,
-        socket.data.userId,
-      );
-
-      if (!isParticipant) {
-        socket.emit("error", {
-          message: "User is not a participant in this conversation",
+        socket.to(message.conversationId).emit("reaction:new", {
+          conversationId: message.conversationId,
+          messageId,
+          newReaction,
+          prevReaction,
         });
-        return;
+
+        console.log(
+          `User ${socket.data.userId} ${socket.id} added reaction to message ${messageId}`,
+        );
+      } catch (error) {
+        console.error("Error in reaction:add handler:", error);
+        if (error instanceof SocketError) {
+          callback?.({ error });
+          return;
+        }
+        callback?.({
+          error: {
+            message: "Failed to add reaction",
+            status: 500,
+            code: "UNKNOWN_ERROR",
+          },
+        });
       }
+    },
+  );
 
-      const removedReaction = await ReactionService.removeReaction({
-        userId: socket.data.userId,
-        messageId,
-      });
+  socket.on(
+    "reaction:remove",
+    async (data: RemoveReactionPayload, callback?: Callback) => {
+      const { messageId } = data;
 
-      socket.to(message.conversationId).emit("reaction:removed", {
-        conversationId: message.conversationId,
-        messageId,
-        removedReaction,
-      });
+      try {
+        const message = await MessageService.getMessageById(messageId);
 
-      console.log(
-        `User ${socket.data.userId} ${socket.id} removed reaction ${removedReaction?.content} from message ${messageId}`,
-      );
-    } catch (error) {
-      console.error("Error in reaction:remove handler:", error);
-      socket.emit("error", {
-        message: "Failed to remove reaction",
-      });
-    }
-  });
+        const isParticipant = await ConversationService.isParticipant(
+          message.conversationId,
+          socket.data.userId,
+        );
+
+        if (!isParticipant) {
+          throw new SocketError(
+            403,
+            "CONVERSATION_NOT_A_PARTICIPANT",
+            "User is not a participant in this conversation",
+          );
+        }
+
+        const removedReaction = await ReactionService.removeReaction({
+          userId: socket.data.userId,
+          messageId,
+        });
+
+        socket.to(message.conversationId).emit("reaction:removed", {
+          conversationId: message.conversationId,
+          messageId,
+          removedReaction,
+        });
+
+        console.log(
+          `User ${socket.data.userId} ${socket.id} removed reaction ${removedReaction?.content} from message ${messageId}`,
+        );
+      } catch (error) {
+        console.error("Error in reaction:remove handler:", error);
+        if (error instanceof SocketError) {
+          callback?.({ error });
+          return;
+        }
+        callback?.({
+          error: {
+            message: "Failed to remove reaction",
+            status: 500,
+            code: "UNKNOWN_ERROR",
+          },
+        });
+      }
+    },
+  );
 };
