@@ -165,6 +165,7 @@ interface Message {
   text: string;
   conversationId: string;
   sender: UserPreviewAtConversation;
+  status: "SENDING" | "SENT" | "FAILED" | "DELIVERED" | "READ";
   createdAt: string;
   reactions: GroupedReactions;
   replyTo?: ReplyMessage | null;

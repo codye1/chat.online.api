@@ -73,6 +73,7 @@ class MessageService {
     return {
       id: message.id,
       text: message.text,
+      status: message.status,
       conversationId: message.conversationId,
       createdAt: message.createdAt.toISOString(),
       sender: {
@@ -314,6 +315,7 @@ class MessageService {
         "reactions" | "sender" | "createdAt" | "replyTo" | "media"
       > & {
         createdAt: Date;
+        status: Message["status"];
         sender: Message["sender"] | string;
         reactions: GroupedReactions | string | null;
         replyTo: Message["replyTo"] | string | null;
@@ -398,6 +400,7 @@ class MessageService {
       m."id",
       m."text",
       m."conversationId",
+      m."status",
       to_char(m."createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",
       json_build_object(
         'id',             u."id",
@@ -454,6 +457,7 @@ class MessageService {
           row.createdAt instanceof Date
             ? row.createdAt.toISOString()
             : (row.createdAt as string),
+        status: row.status as Message["status"],
         sender: {
           ...(parsedSender ?? {}),
           conversationId:
