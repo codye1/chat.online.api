@@ -47,8 +47,8 @@ model RefreshToken {
 
 enum MessageStatus {
   SENT
-  DELIVERED
-  READ
+  SENDING
+  FAILED
 }
 
 model Message {

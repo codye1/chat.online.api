@@ -157,7 +157,6 @@ export const registerMessageHandlers = ({
               "User is not a participant in this conversation",
             );
           }
-          console.log(media);
 
           const message = await MessageService.createMessage({
             conversationId,
@@ -311,6 +310,15 @@ export const registerMessageHandlers = ({
       const { messageId, conversationId, newText, replaceMedia } = data;
       try {
         const message = await MessageService.getMessageById(messageId);
+
+        if (message.conversationId !== conversationId) {
+          throw new SocketError(
+            400,
+            "MESSAGE_CONVERSATION_MISMATCH",
+            "Message does not belong to the specified conversation",
+          );
+        }
+
         if (message.senderId !== socket.data.userId) {
           throw new SocketError(
             403,
@@ -326,7 +334,7 @@ export const registerMessageHandlers = ({
           replaceMedia,
         });
 
-        io.to(conversationId).emit("message:edited", {
+        io.to(message.conversationId).emit("message:edited", {
           editedMessage,
         });
 

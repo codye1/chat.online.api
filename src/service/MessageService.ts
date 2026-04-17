@@ -315,7 +315,7 @@ class MessageService {
         "reactions" | "sender" | "createdAt" | "replyTo" | "media"
       > & {
         createdAt: Date;
-        status: string;
+        status: Message["status"];
         sender: Message["sender"] | string;
         reactions: GroupedReactions | string | null;
         replyTo: Message["replyTo"] | string | null;
