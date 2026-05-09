@@ -214,6 +214,86 @@ class FolderService {
     });
   }
 
+  static async updateFolderPosition(
+    userId: string,
+    folderId: string,
+    newPosition: number,
+  ) {
+    await prisma.$transaction(async (tx) => {
+      const folder = await tx.folder.findFirst({
+        where: {
+          id: folderId,
+          userId,
+        },
+        select: {
+          position: true,
+        },
+      });
+
+      if (!folder) {
+        return;
+      }
+
+      const maxPositionResult = await tx.folder.aggregate({
+        where: {
+          userId,
+        },
+        _max: {
+          position: true,
+        },
+      });
+
+      const maxPosition = maxPositionResult._max.position ?? 0;
+      const targetPosition = Math.max(0, Math.min(newPosition, maxPosition));
+
+      if (targetPosition === folder.position) {
+        return;
+      }
+
+      await tx.folder.update({
+        where: { id: folderId },
+        data: { position: -1 },
+      });
+
+      if (targetPosition < folder.position) {
+        await tx.folder.updateMany({
+          where: {
+            userId,
+            position: {
+              gte: targetPosition,
+              lt: folder.position,
+            },
+          },
+          data: {
+            position: {
+              increment: 1,
+            },
+          },
+        });
+      } else {
+        await tx.folder.updateMany({
+          where: {
+            userId,
+            position: {
+              gt: folder.position,
+              lte: targetPosition,
+            },
+          },
+          data: {
+            position: {
+              decrement: 1,
+            },
+          },
+        });
+      }
+
+      await tx.folder.update({
+        where: { id: folderId },
+        data: { position: targetPosition },
+      });
+    });
+  }
+
   static async deleteFolder(folderId: string) {
     await prisma.folder.delete({
       where: { id: folderId },

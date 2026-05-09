@@ -496,6 +496,35 @@ class ChatController {
     return res.json({ success: true });
   }
 
+  static async updateFolderPosition(
+    req: Request<{ folderId: string }>,
+    res: Response,
+  ) {
+    const userId = req.userId;
+    const { folderId } = req.params;
+    const { position } = req.body as { position: number };
+
+    if (typeof position !== "number" || !Number.isInteger(position)) {
+      throw new ApiError(
+        400,
+        "INVALID_INPUT",
+        "Position must be an integer number",
+      );
+    }
+
+    const isOwned = await FolderService.isOwnedByUser(userId, folderId);
+    if (!isOwned) {
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "You are not the owner of this folder",
+      );
+    }
+
+    await FolderService.updateFolderPosition(userId, folderId, position);
+    return res.json({ success: true });
+  }
+
   static async deleteFolder(req: Request<{ folderId: string }>, res: Response) {
     const userId = req.userId;
     const { folderId } = req.params;
