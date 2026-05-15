@@ -116,6 +116,12 @@ router.patch(
   ChatController.renameFolder,
 );
 
+router.patch(
+  "/chat/folders/:folderId/position",
+  authMiddleware,
+  ChatController.updateFolderPosition,
+);
+
 router.delete(
   "/chat/folders/:folderId",
   authMiddleware,
